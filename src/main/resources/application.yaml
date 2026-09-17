@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: course-registration-system
+
+server:
+  port: ${SERVER_PORT:8080}
