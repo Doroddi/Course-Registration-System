@@ -1,6 +1,6 @@
 # 데이터 모델 및 ERD 초안
 
-관련 기준: [요구사항](REQUIREMENTS.md). 논리 모델이며 DDL·JPA 매핑·물리 타입은 아직 확정하지 않았다. 아래 `string`, `int`, `time`은 의미를 설명하는 표기이며 DB 타입 지정이 아니다.
+관련 기준: [요구사항](REQUIREMENTS.md). 학번은 INTEGER·Java Integer(D34), 생성 ID는 BIGINT·Java Long(D76)으로 확정했다. 관계·삭제·스키마 관리 방침은 D78을 따른다. 나머지 컬럼의 물리 타입·길이와 ID 생성 구문은 후속 설계한다.
 
 ## 관계
 
@@ -10,32 +10,32 @@ erDiagram
     DEPARTMENT ||--o{ PROFESSOR : has
     DEPARTMENT ||--o{ COURSE_OFFERING : offers
     SUBJECT ||--o{ COURSE_OFFERING : opens
-    COURSE_OFFERING ||--o{ CLASS_MEETING : schedules
+    COURSE_OFFERING ||--|{ CLASS_MEETING : schedules
     STUDENT ||--o{ ENROLLMENT : enrolls
     COURSE_OFFERING ||--o{ ENROLLMENT : receives
     PROFESSOR ||--o{ TEACHING_ASSIGNMENT : teaches
-    COURSE_OFFERING ||--o{ TEACHING_ASSIGNMENT : assigned
+    COURSE_OFFERING ||--|{ TEACHING_ASSIGNMENT : assigned
 
     DEPARTMENT {
-        id department_id PK
+        bigint department_id PK
         string name
     }
     STUDENT {
-        string student_number PK
+        int student_number PK
         string name
-        id department_id FK
+        bigint department_id FK
         int grade
     }
     PROFESSOR {
-        id professor_id PK
+        bigint professor_id PK
         string name
-        id department_id FK
+        bigint department_id FK
     }
     SUBJECT {
         string subject_code PK
     }
     COURSE_OFFERING {
-        id offering_id PK
+        bigint offering_id PK
         string subject_code FK
         int academic_year
         string term
@@ -43,54 +43,55 @@ erDiagram
         string name
         int credits
         int capacity
-        id department_id FK
+        bigint department_id FK
     }
     CLASS_MEETING {
-        id meeting_id PK
-        id offering_id FK
+        bigint meeting_id PK
+        bigint offering_id FK
         string day_of_week
         time starts_at
         time ends_at
     }
     ENROLLMENT {
-        string student_number PK,FK
-        id offering_id PK,FK
+        bigint enrollment_id PK
+        int student_number FK
+        bigint offering_id FK
     }
     TEACHING_ASSIGNMENT {
-        id professor_id PK,FK
-        id offering_id PK,FK
+        bigint professor_id PK,FK
+        bigint offering_id PK,FK
     }
 ```
 
-자식 쪽의 `0..N`은 관련 행을 여러 개 가질 수 있음을 나타낸다. 개설 강좌에 필요한 최소 수업 시간·담당 교수 수는 미정이며, 0개인 강좌를 신청 가능하게 하기로 결정한 것은 아니다.
+개설 강좌의 수업 시간과 강의 담당 연결은 각각 최소 1개이다(D77). 이 최소 개수는 단순 FK만으로 보장되지 않으므로 데이터 구성 검증에서 확인한다.
 
 ## 각 테이블을 두는 이유
 
 | 테이블 | 저장하는 사실 | 결정 상태 |
 |---|---|---|
-| DEPARTMENT | 학생·교수의 소속 및 강좌 개설 학과 | 분리 확정. ID·이름은 초안 필드 |
-| STUDENT | 변하지 않는 학번과 이름·학과·학년 | 확정 |
-| PROFESSOR | 교수 정보와 하나의 소속 학과 | 관계 확정. ID·이름은 초안 필드 |
+| DEPARTMENT | 학생·교수의 소속 및 강좌 개설 학과 | 분리·증가 BIGINT PK 확정. 이름 길이는 후속 설계 |
+| STUDENT | 변하지 않는 학번과 이름·학과·학년(1~4) | 확정 |
+| PROFESSOR | 교수 정보와 하나의 소속 학과 | 관계·증가 BIGINT PK 확정. 이름 길이는 후속 설계 |
 | SUBJECT | 학기·분반과 독립된 과목 식별 | 과목 코드 사용 확정. 코드 PK는 초안 제안 |
 | COURSE_OFFERING | 특정 연도·학기의 분반, 이름·학점·정원·개설 학과 | 확정 |
-| CLASS_MEETING | 한 개설 강좌의 요일별 수업 구간 | 분리 확정. 별도 시간 ID는 초안 제안 |
-| ENROLLMENT | 학생과 개설 강좌 사이의 현재 신청 관계 | 관계·취소 시 삭제 확정. 두 FK를 복합 PK로 쓰는 것은 초안 제안 |
-| TEACHING_ASSIGNMENT | 교수와 개설 강좌의 담당 관계 | N:M 확정. 두 FK를 복합 PK로 쓰는 것은 초안 제안 |
+| CLASS_MEETING | 한 개설 강좌의 요일별 수업 구간 | 분리·증가 BIGINT PK 확정 |
+| ENROLLMENT | 학생과 개설 강좌 사이의 현재 신청 관계 | 증가 BIGINT enrollment_id PK와 학생·강좌 UNIQUE, 취소 시 삭제 확정 |
+| TEACHING_ASSIGNMENT | 교수와 개설 강좌의 담당 관계 | N:M 관계를 별도 엔티티로 표현. 두 FK의 복합 PK 확정 |
 
 과목명까지 SUBJECT에 저장할지, 개설 강좌 이름과 어떻게 구분할지는 미정이다. 현재 초안은 COURSE_OFFERING에 강좌명을 두고 SUBJECT에는 식별 코드를 표시한다. 학점이 모든 분반·학기에서 동일하다는 가정은 두지 않는다.
 
 ## 식별자와 제약조건
 
-- 학번은 유일하고 불변이다. 숫자처럼 보이더라도 선행 0 등 표현 보존 여부를 확인한 뒤 물리 타입을 정한다.
+- 학번은 유일하고 불변이며 연도 4자리 + 뒤 5자리의 고정 9자리 숫자이다(D33). 학생 PK와 수강신청의 학번 FK는 DB INTEGER를 사용한다. Java에서는 Integer, API에서는 JSON 숫자로 표현한다(D34). 연도 의미·허용 범위와 뒤 5자리 부여 규칙은 미정이며, 고정 길이·형식은 별도 검증한다.
 - 개설 강좌는 별도 PK를 사용하고 `(academic_year, term, offering_code)`는 UNIQUE이다.
-- 수강신청의 `(student_number, offering_id)`와 강의 담당의 `(professor_id, offering_id)`는 각각 유일해야 한다. 복합 PK 대신 별도 PK와 UNIQUE를 사용하는 구현도 검토할 수 있다.
-- 모든 관계에는 외래 키를 둔다는 초안이다. 학생·강좌 등 부모 데이터의 삭제 및 CASCADE 정책은 미정이다.
+- 수강신청의 `(student_number, offering_id)`와 강의 담당의 `(professor_id, offering_id)`는 각각 유일해야 한다. 신청은 별도 BIGINT PK와 UNIQUE, 강의 담당은 두 FK의 복합 PK를 사용한다(D76).
+- 관계는 외래 키로 표현하고 참조되는 부모 삭제는 제한한다(D78). 취소는 신청 행만 명시적으로 삭제한다.
 - 교수 소속 학과와 강좌 개설 학과가 같아야 한다는 제약은 없다.
-- `starts_at < ends_at`은 자정을 넘기지 않는 수업 범위를 채택할 경우의 CHECK 후보이다. 요일·학기·학년·학점·정원 범위의 허용 값은 별도 확정한다.
+- 수업은 분 단위로 같은 날 시작·종료하며 starts_at < ends_at을 요구한다. 학년은 1~4(D39), 학기는 1·2, 학점은 정수 1~6, 정원은 양의 정수이다(D77). 요일의 DB 저장 표현은 후속 설계한다.
 
 ## DB 키만으로 보장되지 않는 규칙
 
-수강신청의 학생·강좌 조합을 유일하게 해도 다른 분반의 offering_id는 다르므로 동일 과목 중복은 막지 못한다. 이 검사는 개설 강좌의 연도·학기·과목 코드까지 따라가야 한다. 동시 요청에서도 보장할 방법은 트랜잭션 설계 때 결정한다.
+수강신청의 학생·강좌 조합을 유일하게 해도 다른 분반의 offering_id는 다르므로 동일 과목 중복은 막지 못한다. 이 검사는 개설 강좌의 연도·학기·과목 코드까지 따라가야 한다. 학생 행 잠금과 잠금 후 검증으로 동시 요청을 보호한다(D64, D75).
 
 정원, 학점 합, 여러 행 사이의 시간 충돌 역시 이 ERD만으로 보장되지 않는다. 중복 검사를 한 뒤 INSERT하는 단순 순서만으로 충분하다고 가정하지 않는다.
 
@@ -99,8 +100,8 @@ erDiagram
 | 기능 | 관계를 사용하는 방법 |
 |---|---|
 | 학과별 강좌 목록 | COURSE_OFFERING.department_id로 필터하고 시간·담당 교수 조회 |
-| 현재 신청 인원 | ENROLLMENT를 강좌별로 집계할 수 있음. 별도 카운터 저장 여부는 미정 |
-| 신청 | 대상 학기와 정책을 검사한 뒤 ENROLLMENT 생성. 원자성 보장 방법은 후속 설계 |
+| 현재 신청 인원 | ENROLLMENT를 강좌별로 집계할 수 있음. 별도 카운터 대신 COUNT 사용 확정(D65) |
+| 신청 | 대상 학기와 정책을 검사한 뒤 ENROLLMENT 생성. 검사·잠금·저장을 같은 트랜잭션에서 수행(D64~D65) |
 | 시간표 | 학생의 ENROLLMENT → 대상 학기 COURSE_OFFERING → CLASS_MEETING |
 | 취소 | 해당 ENROLLMENT만 제거. 이미 없으면 추가 변화 없이 성공 |
 
@@ -112,3 +113,11 @@ erDiagram
 2. 미정 필드·범위·식별자 제안을 확정한다.
 3. API의 요청·성공·오류 계약을 정한다.
 4. 실제 DB를 기준으로 트랜잭션·동시성 전략을 비교하고 DDL 및 테스트로 검증한다.
+
+수업 요일·시작·종료 시각은 KST(Asia/Seoul)를 기준으로 해석한다(D49). 날짜·시각의 물리 저장 타입은 후속 설계하며, JWT의 Unix 시간 표현과 구분한다.
+
+시간표는 학생·학기로 필터한 뒤 ENROLLMENT.enrollment_id 오름차순으로 반환한다(D63, D66). 증가 ID는 학생 잠금 안에서 조건을 통과한 신청 저장 시 발급하며 취소 후 재신청은 새 ID를 사용한다. 신청 PK는 D76에 따라 증가 BIGINT ID이며 생성 구문은 후속 확정한다.
+
+[신청·취소 동시성 설계](CONCURRENCY_DESIGN.md)에 D64~D66의 확정 사항과 구현 제안을 구분한다.
+
+JPA 매핑은 필요한 방향의 ManyToOne(LAZY)을 사용한다(D78). 예를 들어 Enrollment는 Student와 CourseOffering을 참조하며, 부모의 신청 컬렉션은 필요한 경우에만 추가한다. API는 DTO를 반환한다. Flyway로 DDL을 관리하고 ddl-auto=validate로 매핑을 확인한다.
