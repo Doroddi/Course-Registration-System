@@ -28,7 +28,9 @@
 - Wrapper 9.7.1 갱신 및 공식 Wrapper JAR SHA-256 일치 확인. git diff --check 통과.
 - Windows 11 / WSL 2.7.14에서 Docker Desktop 4.91.0 설치 완료. Docker CLI 29.8.0, Compose v5.5.1 확인.
 - docker compose config --quiet 통과. .env가 Git 제외 대상임을 확인.
-- Docker 엔진 기동·PostgreSQL 컨테이너 실행 및 SQL 연결: 미검증.
+- 2026-09-18: Docker Engine 29.8.0 응답 및 docker compose up -d --wait postgres 성공. PostgreSQL 18.6 healthy 확인.
+- 컨테이너 내부 psql로 DB·사용자·버전 조회 및 TCP 비밀번호 접속 후 SELECT 1 성공. 호스트 127.0.0.1:5432 TCP 연결 확인. 애플리케이션의 JDBC 접속 검증은 후속 범위다.
+- postgres_data 명명된 볼륨이 /var/lib/postgresql에 연결됐음을 확인.
 - 업무 API·초기 데이터·동시성·성능: 미구현 또는 미검증.
 
 ## 공식 근거
