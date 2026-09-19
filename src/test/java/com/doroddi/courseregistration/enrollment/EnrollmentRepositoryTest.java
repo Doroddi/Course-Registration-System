@@ -22,7 +22,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.sql.SQLException;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.initial-data.enabled=false")
 @Import(EnrollmentRepositoryTest.DatabaseConfig.class)
 @Transactional
 class EnrollmentRepositoryTest {
@@ -39,6 +39,54 @@ class EnrollmentRepositoryTest {
     @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
 
+    @Test
+    void creditCheckReturnsZeroWithoutEnrollments() {
+        assertEquals(0L, enrollments.countOverCreditStudents(2026, (short) 1));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {17, 18, 19, 21})
+    void creditCheckHonorsEighteenCreditBoundary(int credits) {
+        registerCredits(student, 2026, (short) 1, credits);
+        assertEquals(credits > 18 ? 1L : 0L,
+                enrollments.countOverCreditStudents(2026, (short) 1));
+    }
+
+    @Test
+    void creditCheckCountsStudentsRatherThanEnrollmentRows() {
+        Student second = students.saveAndFlush(new Student(202600002, "두번째", (short) 2, department, "test-only-hash"));
+        Student third = students.saveAndFlush(new Student(202600003, "세번째", (short) 3, department, "test-only-hash"));
+        registerCredits(student, 2026, (short) 1, 19);
+        registerCredits(second, 2026, (short) 1, 24);
+        registerCredits(third, 2026, (short) 1, 18);
+        assertEquals(2L, enrollments.countOverCreditStudents(2026, (short) 1));
+    }
+
+    @Test
+    void creditCheckSeparatesYearsAndTerms() {
+        registerCredits(student, 2026, (short) 1, 12);
+        registerCredits(student, 2026, (short) 2, 12);
+        registerCredits(student, 2025, (short) 1, 12);
+        assertEquals(0L, enrollments.countOverCreditStudents(2026, (short) 1));
+        registerCredits(student, 2026, (short) 1, 7);
+        assertEquals(1L, enrollments.countOverCreditStudents(2026, (short) 1));
+        assertEquals(0L, enrollments.countOverCreditStudents(2026, (short) 2));
+        assertEquals(0L, enrollments.countOverCreditStudents(2025, (short) 1));
+    }
+
+    private int creditOfferingSequence = 100;
+
+    private void registerCredits(Student target, int year, short term, int totalCredits) {
+        // 학점 집계만 검증하는 fixture이며 다른 신청 조건의 서비스 검사를 거치지 않는다.
+        for (int remaining = totalCredits; remaining > 0; remaining -= 6) {
+            CourseOffering course = offerings.saveAndFlush(new CourseOffering(
+                    subject, year, term, Integer.toString(++creditOfferingSequence), "학점 검사",
+                    (short) Math.min(remaining, 6), 30, department));
+            enrollments.saveAndFlush(new Enrollment(target, course));
+        }
+        entityManager.clear();
+    }
+
     private Student student;
     private CourseOffering offering;
     private Department department;
@@ -46,7 +94,7 @@ class EnrollmentRepositoryTest {
 
     @BeforeEach
     void prepareParents() {
-        department = departments.saveAndFlush(new Department("컴퓨터공학부"));
+        department = departments.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
         student = students.saveAndFlush(new Student(202600001, "김학생", (short) 1, department, "test-only-hash"));
         subject = subjects.saveAndFlush(new Subject("001"));
         offering = offerings.saveAndFlush(new CourseOffering(subject, 2026, (short) 1,

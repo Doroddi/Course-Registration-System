@@ -24,7 +24,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import java.time.LocalTime;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.initial-data.enabled=false")
 @Import(CourseScheduleRepositoryTest.DatabaseConfig.class)
 @Transactional
 class CourseScheduleRepositoryTest {
@@ -48,8 +48,8 @@ class CourseScheduleRepositoryTest {
 
     @BeforeEach
     void prepareParents() {
-        department = departments.saveAndFlush(new Department("컴퓨터공학부"));
-        Department other = departments.saveAndFlush(new Department("수학과"));
+        department = departments.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
+        Department other = departments.saveAndFlush(new Department("수학과", (short) 11));
         professor = professors.saveAndFlush(new Professor("김교수", other));
         subject = subjects.saveAndFlush(new Subject("001"));
         offering = offerings.saveAndFlush(new CourseOffering(subject, 2026, (short) 1,

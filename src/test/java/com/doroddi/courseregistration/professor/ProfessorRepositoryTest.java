@@ -16,7 +16,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.initial-data.enabled=false")
 @Import(ProfessorRepositoryTest.DatabaseConfig.class)
 @Transactional
 class ProfessorRepositoryTest {
@@ -41,7 +41,7 @@ class ProfessorRepositoryTest {
 
     @Test
     void savesAndFindsProfessorWithDepartment() {
-        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부"));
+        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
         Professor saved = professorRepository.saveAndFlush(new Professor("김교수", department));
         assertNotNull(saved.getId());
 
@@ -57,7 +57,7 @@ class ProfessorRepositoryTest {
 
     @Test
     void allowsProfessorsWithSameNameInSameDepartment() {
-        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부"));
+        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
         Professor first = professorRepository.saveAndFlush(new Professor("김교수", department));
         Professor second = professorRepository.saveAndFlush(new Professor("김교수", department));
         assertNotEquals(first.getId(), second.getId());
@@ -87,7 +87,7 @@ class ProfessorRepositoryTest {
 
     @Test
     void rejectsDeletingDepartmentReferencedByProfessor() {
-        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부"));
+        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
         professorRepository.saveAndFlush(new Professor("김교수", department));
         entityManager.clear();
 
@@ -99,7 +99,7 @@ class ProfessorRepositoryTest {
 
     @Test
     void rejectsWhitespaceOnlyProfessorName() {
-        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부"));
+        Department department = departmentRepository.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
         assertThrows(DataIntegrityViolationException.class, () ->
                 professorRepository.saveAndFlush(new Professor("   ", department)));
     }

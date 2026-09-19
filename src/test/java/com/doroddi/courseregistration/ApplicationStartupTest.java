@@ -12,8 +12,13 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "app.initial-data.enabled=false")
+@org.testcontainers.junit.jupiter.Testcontainers
 class ApplicationStartupTest {
+    @org.testcontainers.junit.jupiter.Container
+    @org.springframework.boot.testcontainers.service.connection.ServiceConnection
+    static final org.testcontainers.postgresql.PostgreSQLContainer postgres =
+            new org.testcontainers.postgresql.PostgreSQLContainer("postgres:18.6");
     @LocalServerPort
     private int port;
 
@@ -26,8 +31,8 @@ class ApplicationStartupTest {
                     .build();
             var response = client.send(request, HttpResponse.BodyHandlers.discarding());
 
-            // 과제의 /health 200은 초기 데이터와 API 준비 완료를 의미한다.
-            assertEquals(404, response.statusCode());
+            // 초기 데이터 처리를 비활성화했으므로 준비 완료를 선언하지 않는다.
+            assertEquals(503, response.statusCode());
         }
     }
 }
