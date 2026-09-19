@@ -1,8 +1,8 @@
 # 기술 스택과 물리 데이터 모델 검토
 
-상태: 기술 스택·주요 물리 설계·JPA 관계 방침 확정 / 세부 DDL 검토 / 구현·실행 검증은 후속 PR 범위
+상태: 기술 스택·물리 스키마 확정 / Flyway V1~V9·JPA 매핑 및 Repository 테스트 130개 통과 / 업무 API·동시성 구현 전
 
-확정 정책은 [요구사항](REQUIREMENTS.md)을 따른다. 데이터 접근 방식은 D73, 나머지 기술 스택은 D74로 확정했다. 잠금 적용 방침은 D75를 따르며 주요 키·데이터 범위·JPA 관계·삭제·스키마 관리 방침은 D76~D78로 확정했다. 세부 컬럼 타입·길이·생성 구문은 검토 중이다. 실행 기반 구성과 실제 검증 범위는 [실행 기반 구성](BOOTSTRAP.md)에 기록한다.
+확정 정책은 [요구사항](REQUIREMENTS.md)을 따른다. 데이터 접근 방식은 D73, 나머지 기술 스택은 D74로 확정했다. 잠금 적용 방침은 D75를 따르며 주요 키·데이터 범위·JPA 관계·삭제·스키마 관리 방침은 D76~D78로 확정했다. 물리 타입·길이·생성 구문·인증 정보 위치·초기 인덱스는 D79~D83으로 확정했다. 서버 기반 검증은 [실행 기반 기록](BOOTSTRAP.md), 스키마·매핑 검증은 [DB 검증 기록](DB_SETUP.md)을 따른다.
 
 ## 확정 기술 구성
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 언어 | Java 25 LTS, 프리뷰 기능 미사용 | 신규 구현의 기준 버전을 LTS로 고정 |
 | 서버 | Spring Boot 4.1.1, Spring MVC | HTTP 요청과 JPA 트랜잭션을 동기 흐름으로 구성 |
-| 빌드 | Gradle Kotlin DSL, Gradle Wrapper 9.7.1 | Java 25 호환 버전 사용, 배포 체크섬 고정 및 빌드 검증 |
+| 빌드 | Gradle Kotlin DSL, Wrapper 9.7.1 | 기존 Wrapper 8.10을 갱신. Java 25 지원 범위를 확인하고 배포 체크섬 고정 |
 | DB | PostgreSQL 18.6 | 실제 행 잠금·READ COMMITTED·COUNT 동작을 개발과 테스트에서 동일 DB로 검증 |
 | 데이터 접근(확정) | Spring Data JPA | 엔티티 매핑과 영속성 관리를 사용하며 생성 SQL·트랜잭션 동작을 검증 |
 | 트랜잭션 | 서비스 계층의 Spring 트랜잭션 | 신청·취소 전체를 하나의 커밋/롤백 단위로 구성 |
@@ -43,22 +43,23 @@ Spring Data JPA를 사용하되 엔티티 관계·변경 감지뿐 아니라 영
 
 ## 물리 스키마의 주요 선택
 
-| 대상 | 제안 |
+| 대상 | 확정 설계 |
 |---|---|
 | 학번 | 확정된 INTEGER PK 유지, 9자리 범위 CHECK. 연도·뒤 5자리 생성 규칙은 별도 결정 |
 | 학과·교수·개설 강좌·수업 시간 ID | BIGINT GENERATED ALWAYS AS IDENTITY PK, Java Long |
 | 신청 ID | BIGINT GENERATED ALWAYS AS IDENTITY PK로 전환, UNIQUE(student_number, offering_id) 유지 |
-| 과목 | subject_code VARCHAR(30) PK. 이름은 개설 강좌에 유지하며 코드 길이는 제안 |
+| 과목 | subject_code VARCHAR(30) PK, 숫자만 허용. 이름·학점은 개설 강좌에 유지 |
 | 강의 담당 연결 | PRIMARY KEY(professor_id, offering_id), 별도 증가 ID 없음 |
 | 수업 시간 | 요일 SMALLINT(월=1~일=7), 시작·종료 TIME WITHOUT TIME ZONE. API enum·HH:mm과 변환하며 KST 의미 유지 |
 | 학년 | SMALLINT, CHECK 1~4 |
 | 필수 관계 | NOT NULL과 FK 적용, 부모 삭제는 RESTRICT. 신청 취소는 신청 행만 명시적으로 DELETE |
 
-학기·학점·정원·수업 범위와 최소 수업 시간·담당 교수 수는 D77로 확정했다. 문자열 길이·잔여 컬럼 타입은 미정이다. 이를 결정하기 전에 실행용 DDL을 완성된 설계로 제시하지 않는다. 로그인 계정의 비밀번호 해시 저장 위치는 인증 물리 모델에서 함께 결정한다.
+학기·학점·정원·수업 범위와 최소 수업 시간·담당 교수 수는 D77로 확정했다. 문자열 길이·숫자 타입은 D79~D80을 따른다. 비밀번호 해시는 STUDENT.password_hash VARCHAR(255) NOT NULL에 저장하고 계정 테이블 분리는 추후 검토한다(D82).
 
-## 인덱스 후보
+## 초기 인덱스와 후속 후보
 
-- ENROLLMENT(offering_id): 강좌별 COUNT 지원.
+- 초기 적용: ENROLLMENT(offering_id), CLASS_MEETING(offering_id)(D83). 강좌별 COUNT와 수업 시간 조회 지원.
+- 아래 나머지 인덱스는 후속 후보이며 초기 적용으로 확정하지 않는다.
 - ENROLLMENT(student_number, enrollment_id): 학생별 신청 순서 조회 지원. 대상 학기는 개설 강좌와 조인하여 필터.
 - COURSE_OFFERING(academic_year, term, offering_code): 확정된 학기별 강좌 코드 유일성.
 - COURSE_OFFERING(academic_year, term, name, offering_id) 및 학과 필터용 department_id 포함 인덱스: 목록 필터·정렬 후보.
@@ -87,23 +88,23 @@ D75에 따라 JPA @Lock(PESSIMISTIC_WRITE)를 먼저 적용하고 생성 SQL·DB
 
 ## 물리 스키마·JPA 매핑·잠금 검토안
 
-상태: 증가 BIGINT PK·신청 UNIQUE·강의 담당 복합 PK·데이터 범위·ManyToOne(LAZY)·DTO·부모 삭제 제한·Flyway 및 ddl-auto=validate는 D76~D78로 확정했다. IDENTITY 구문·EmbeddedId/MapsId·OSIV 설정·문자열 길이·숫자 표현·대기 제한 설정 방식은 구현 제안이다. 잠금의 JPA 우선 적용·SQL 검증·필요 시 native query 전환은 D75로 확정했다.
+상태: 증가 BIGINT PK·신청 UNIQUE·강의 담당 복합 PK·데이터 범위·ManyToOne(LAZY)·DTO·부모 삭제 제한·Flyway 및 ddl-auto=validate는 D76~D78로 확정했다. IDENTITY 구문·문자열 길이·숫자 표현은 D79~D81로 확정했다. EmbeddedId/MapsId는 강의 담당 복합 키에 구현했다. OSIV·대기 제한 설정 방식은 구현 제안이다. 잠금의 JPA 우선 적용·SQL 검증·필요 시 native query 전환은 D75로 확정했다.
 
 ### 확정된 제약 범위와 세부 표현 제안
 
-- 학기는 1·2학기만 지원하며 SMALLINT와 CHECK로 제한한다. 계절학기는 범위에서 제외한다(D77). SMALLINT 저장 표현은 제안이다.
-- 강좌 학점은 정수 1~6, 정원은 양의 INTEGER를 사용한다. 1~6은 확정된 프로젝트 범위이며 실제 대학 공통 규칙을 의미하지 않는다(D77). 학점·정원 분포는 초기 데이터 생성 단계에서 따로 정한다.
+- 학기는 1·2학기만 지원하며 SMALLINT와 CHECK로 제한한다. 계절학기는 범위에서 제외한다(D77). SMALLINT 저장 표현은 D80으로 확정했다.
+- 강좌 학점은 SMALLINT 정수 1~6, 정원은 양의 INTEGER를 사용한다. 1~6은 확정된 프로젝트 범위이며 실제 대학 공통 규칙을 의미하지 않는다(D77). 학점·정원 분포는 초기 데이터 생성 단계에서 따로 정한다.
 - 매주 반복하는 수업을 대상으로 요일은 1~7, 시각은 분 단위 00:00~23:59로 제한하며 starts_at < ends_at을 요구한다. 자정에 끝나거나 자정을 넘기는 수업은 이 제안의 범위에서 제외한다. TIME(0)만으로는 분 단위가 강제되지 않으므로 초=0 검증도 둔다.
 - 신청 가능한 개설 강좌는 수업 시간과 담당 교수가 각각 최소 1개 있어야 한다. 이는 단순 FK·행 CHECK만으로 보장되지 않으므로 데이터 생성 완료 검증과 향후 강좌 등록 검증에서 보장한다.
-- 이름은 학생·교수·학과 VARCHAR(100), 강좌 VARCHAR(200), 과목·강좌 코드는 VARCHAR(30)을 후보로 사용한다. 필수 값에는 NOT NULL 및 공백만 있는 값 거절을 적용한다.
-- 연도는 INTEGER의 1000~9999 범위를 후보로 사용한다. 학번의 앞 4자리 의미·생성 규칙은 별도 정책이다.
+- 이름은 학생·교수·학과 VARCHAR(100), 강좌 VARCHAR(200), 과목·강좌 코드는 VARCHAR(30)을 사용하며 두 코드는 숫자(0~9)만 허용한다(D79). 필수 값에는 NOT NULL 및 공백만 있는 값 거절을 적용한다.
+- 연도는 INTEGER의 1000~9999 범위를 사용한다(D80). 학번의 앞 4자리 의미·생성 규칙은 별도 정책이다.
 
 ### JPA 매핑 방침과 세부 구현 제안
 
 - 신청은 Enrollment 엔티티로 두고 Student와 CourseOffering에 각각 단방향 ManyToOne(fetch=LAZY)을 둔다. 증가 신청 ID를 단일 PK로 사용하고 학생·강좌 유일 제약을 별도로 유지한다.
 - 강의 담당은 TeachingAssignment 엔티티, 교수·강좌 복합 키는 EmbeddedId와 MapsId로 매핑한다. 직접 ManyToMany로 숨기지 않고 연결 행을 명시적으로 관리한다.
 - 학생·교수·강좌에서 학과, 강좌에서 과목, 수업 시간에서 강좌도 필요한 ManyToOne 관계를 둔다. 부모의 역방향 컬렉션은 필요한 경우에만 추가한다.
-- 생성 ID는 GenerationType.IDENTITY를 후보로 사용한다. 학번·과목 코드는 외부에서 부여하는 Id이며 자동 생성하지 않는다.
+- 생성 ID는 GenerationType.IDENTITY를 사용한다(D81). 학번·과목 코드는 외부에서 부여하는 Id이며 자동 생성하지 않는다.
 - 부모 삭제는 DB RESTRICT, 관계에는 CascadeType.REMOVE 및 광범위한 CascadeType.ALL을 적용하지 않는다. 취소는 Enrollment만 명시적으로 삭제한다.
 - Entity를 응답으로 직접 직렬화하지 않고 DTO를 사용한다. spring.jpa.open-in-view=false를 제안하며 필요한 데이터는 서비스 트랜잭션 안에서 조회·구성한다.
 - Flyway가 DDL을 관리하고 Hibernate ddl-auto=validate로 매핑을 검증한다(D78). 전체 CHECK·인덱스 검증을 Hibernate validate만으로 대체하지 않는다.

@@ -6,12 +6,14 @@
 
 ## 현재 상태
 
-Spring Boot 기본 서버와 기동 테스트, PostgreSQL 개발 환경을 구성했습니다. 업무 API·JPA·초기 데이터 및 애플리케이션 DB 연결은 아직 구현 전입니다. /health는 준비 완료를 의미하므로 현재 제공하지 않습니다.
+Spring Boot 서버 기반과 Flyway V1~V9, 8개 테이블의 JPA 엔티티·Repository를 구현했습니다. PostgreSQL 기반 Repository 테스트 130개가 통과했습니다. 업무 API·인증·초기 데이터·동시성 처리는 아직 구현 전입니다. /health는 아직 제공하지 않으며 초기 데이터와 API 준비 전에는 200을 반환하지 않습니다.
+
+확정 스택은 Java 25, Spring Boot 4.1.1, Spring Data JPA, PostgreSQL 18.6입니다. Gradle Wrapper는 9.7.1을 사용합니다. 현재 빌드에는 MVC·Validation·JPA·Flyway·PostgreSQL 드라이버·Lombok·Testcontainers를 적용했습니다. Security는 인증 단계에서 추가합니다.
 
 ## 설계 검토 경로
 
 1. [요구사항과 정책](docs/REQUIREMENTS.md): 확정 사항, 미정 사항, 검증 시나리오
-2. [데이터 모델과 ERD](docs/DATA_MODEL.md): 관계, 키, 제약조건 초안
+2. [데이터 모델과 ERD](docs/DATA_MODEL.md): 관계, 키, 제약조건과 구현 범위
 3. [첫 설계 PR 초안](docs/reviews/initial-design-pr.md): 검토 범위와 주요 질문
 4. [설계 결정 정리](prompts/0001-design-conversation.md): 요구사항 해석과 대안 검토 과정
 
@@ -26,13 +28,15 @@ Spring Boot 기본 서버와 기동 테스트, PostgreSQL 개발 환경을 구�
 
 ## 개발 및 검증 계획
 
-설계 검토 → 실행 환경 및 헬스체크 → 데이터 생성·조회 → 신청·취소 → 동시성 검증 → 실행 및 API 문서 정리 순으로 진행합니다. 변경은 기능 단위로 나누고 설계 근거와 검증 결과를 기록합니다.
+설계 검토 → 실행 환경 → 스키마·JPA → 초기 데이터·준비 상태 → 인증 → 목록 조회 → 신청·취소·시간표 → 동시성·최종 검증 순으로 진행합니다. 변경은 기능 단위로 나누고 설계 근거와 검증 결과를 기록합니다.
 
-[변경 단위와 검증 계획](docs/DELIVERY_PLAN.md)에 인증·스키마·초기 데이터까지 포함한 PR 순서와 완료 기준을 정리합니다. 다음 문서 변경의 범위는 [API 및 상세 설계 PR 초안](docs/reviews/api-design-pr.md)에서 확인할 수 있습니다.
+[변경 단위와 검증 계획](docs/DELIVERY_PLAN.md)에 인증·스키마·초기 데이터까지 포함한 PR 순서와 완료 기준을 정리합니다. 현재 스키마 변경 범위와 검증 한계는 [스키마·JPA PR 초안](docs/reviews/schema-jpa-pr.md)과 [AI 리뷰](docs/reviews/schema-jpa-ai-review.md)에서 확인할 수 있습니다.
 
 ## 빌드 및 실행
 
 JDK 25를 설치하고 JAVA_HOME을 해당 JDK로 지정합니다. 최초 빌드에는 Gradle 및 Maven Central 접속이 필요합니다. Gradle을 별도 설치할 필요는 없습니다.
+
+DB 연결 환경 변수 설정과 실행 순서는 [DB 스키마·JPA 검증](docs/DB_SETUP.md)를 먼저 확인합니다. 전체 테스트 중 기동 테스트는 개발 PostgreSQL과 DB_PASSWORD가 필요합니다. Repository 테스트만 실행하려면 Docker 엔진을 켜고 `./gradlew test --tests '*RepositoryTest'`를 사용합니다. 테스트용 DB는 별도로 생성됩니다.
 
 Windows PowerShell:
 
@@ -63,7 +67,7 @@ Docker와 Compose가 실행 가능한 환경에서 아래 순서로 진행합니
 
 호스트 접속은 127.0.0.1:5432, DB 이름은 course_registration, 계정은 course_app입니다. 포트는 .env의 POSTGRES_PORT로 변경할 수 있습니다. 이 계정과 Compose 구성은 로컬 개발용이며 서비스 배포 설정이 아닙니다.
 
-DB 파일은 명명된 볼륨으로 보존합니다. 현재 애플리케이션의 DB 연결·마이그레이션은 아직 적용하지 않았습니다. PostgreSQL 컨테이너의 healthy 상태는 DB 접속 준비만 의미하며, 과제의 데이터 생성 및 API 준비 완료와 구분합니다.
+DB 파일은 명명된 볼륨으로 보존합니다. 서버 기동 시 Flyway 마이그레이션을 적용하고 JPA가 엔티티 매핑을 검증합니다. PostgreSQL 컨테이너의 healthy 상태는 DB 접속 준비만 의미하며, 과제의 데이터 생성 및 API 준비 완료와 구분합니다.
 
 [실행 기반 구현·검증 기록](docs/BOOTSTRAP.md)에 변경 의도와 검증 범위를 기록합니다.
 
