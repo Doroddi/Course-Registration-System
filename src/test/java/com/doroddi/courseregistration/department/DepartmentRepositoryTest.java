@@ -2,6 +2,8 @@ package com.doroddi.courseregistration.department;
 
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -14,7 +16,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.initial-data.enabled=false")
 @Import(DepartmentRepositoryTest.DatabaseConfig.class)
 @Transactional
 class DepartmentRepositoryTest {
@@ -37,7 +39,7 @@ class DepartmentRepositoryTest {
 
     @Test
     void savesAndFindsDepartment() {
-        Department computerScience = new Department("컴퓨터공학부");
+        Department computerScience = new Department("컴퓨터공학부", (short) 10);
 
         Department saved =  departmentRepository.save(computerScience);
 
@@ -49,15 +51,16 @@ class DepartmentRepositoryTest {
         Department found = departmentRepository.findById(saved.getId()).orElseThrow();
 
         assertEquals("컴퓨터공학부", found.getName());
+        assertEquals((short) 10, found.getCode());
     }
 
     @Test
     void rejectsDuplicateDepartmentName() {
-        Department computerScience = new Department("컴퓨터공학부");
+        Department computerScience = new Department("컴퓨터공학부", (short) 10);
 
         departmentRepository.saveAndFlush(computerScience);
 
-        Department computerScience2 = new Department("컴퓨터공학부");
+        Department computerScience2 = new Department("컴퓨터공학부", (short) 11);
 
         assertThrows(DataIntegrityViolationException.class, () -> {
             departmentRepository.saveAndFlush(computerScience2);
@@ -67,28 +70,28 @@ class DepartmentRepositoryTest {
     @Test
     void rejectsNullDepartmentName() {
         assertThrows(DataIntegrityViolationException.class, () -> {
-            departmentRepository.saveAndFlush(new Department(null));
+            departmentRepository.saveAndFlush(new Department(null, (short) 10));
         });
     }
 
     @Test
     void rejectsEmptyDepartmentName() {
         assertThrows(DataIntegrityViolationException.class, () -> {
-            departmentRepository.saveAndFlush(new Department(""));
+            departmentRepository.saveAndFlush(new Department("", (short) 10));
         });
     }
 
     @Test
     void rejectsWhitespaceOnlyDepartmentName() {
         assertThrows(DataIntegrityViolationException.class, () -> {
-            departmentRepository.saveAndFlush(new Department("   "));
+            departmentRepository.saveAndFlush(new Department("   ", (short) 10));
         });
     }
 
     @Test
     void savesAndFindsDepartmentWithMaximumLengthName() {
         String name = "가".repeat(100);
-        Department saved = departmentRepository.saveAndFlush(new Department(name));
+        Department saved = departmentRepository.saveAndFlush(new Department(name, (short) 10));
 
         assertNotNull(saved.getId());
 
@@ -104,7 +107,35 @@ class DepartmentRepositoryTest {
         String name = "가".repeat(101);
 
         assertThrows(DataIntegrityViolationException.class, () -> {
-            departmentRepository.saveAndFlush(new Department(name));
+            departmentRepository.saveAndFlush(new Department(name, (short) 10));
         });
+    }
+
+    @ParameterizedTest
+    @ValueSource(shorts = {10, 99})
+    void acceptsDepartmentCodeBoundaries(short code) {
+        var saved = departmentRepository.saveAndFlush(new Department("경계 학과", code));
+        entityManager.clear();
+        assertEquals(code, departmentRepository.findById(saved.getId()).orElseThrow().getCode());
+    }
+
+    @ParameterizedTest
+    @ValueSource(shorts = {9, 100})
+    void rejectsDepartmentCodeOutsideRange(short code) {
+        assertThrows(DataIntegrityViolationException.class,
+                () -> departmentRepository.saveAndFlush(new Department("범위 학과", code)));
+    }
+
+    @Test
+    void rejectsDuplicateCodeWithDifferentNames() {
+        departmentRepository.saveAndFlush(new Department("컴퓨터공학과", (short) 10));
+        assertThrows(DataIntegrityViolationException.class,
+                () -> departmentRepository.saveAndFlush(new Department("수학과", (short) 10)));
+    }
+
+    @Test
+    void rejectsNullDepartmentCode() {
+        assertThrows(DataIntegrityViolationException.class,
+                () -> departmentRepository.saveAndFlush(new Department("코드 없는 학과", null)));
     }
 }

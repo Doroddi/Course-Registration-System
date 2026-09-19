@@ -6,7 +6,7 @@
 
 ## 현재 상태
 
-Spring Boot 서버 기반과 Flyway V1~V9, 8개 테이블의 JPA 엔티티·Repository를 구현했습니다. PostgreSQL 기반 Repository 테스트 130개가 통과했습니다. 업무 API·인증·초기 데이터·동시성 처리는 아직 구현 전입니다. /health는 아직 제공하지 않으며 초기 데이터와 API 준비 전에는 200을 반환하지 않습니다.
+Spring Boot 서버 기반, Flyway V1~V10, 8개 테이블의 JPA 엔티티·Repository, 초기 데이터 생성·검증과 /health를 구현했습니다. 빈 DB에서는 동적으로 데이터를 생성하고 정상 재시작에서는 기존 데이터를 보존합니다. 대상 학기는 설정으로 관리하며 인증·업무 API·신청 동시성 처리는 후속 구현 대상입니다.
 
 확정 스택은 Java 25, Spring Boot 4.1.1, Spring Data JPA, PostgreSQL 18.6입니다. Gradle Wrapper는 9.7.1을 사용합니다. 현재 빌드에는 MVC·Validation·JPA·Flyway·PostgreSQL 드라이버·Lombok·Testcontainers를 적용했습니다. Security는 인증 단계에서 추가합니다.
 
@@ -36,7 +36,7 @@ Spring Boot 서버 기반과 Flyway V1~V9, 8개 테이블의 JPA 엔티티·Repo
 
 JDK 25를 설치하고 JAVA_HOME을 해당 JDK로 지정합니다. 최초 빌드에는 Gradle 및 Maven Central 접속이 필요합니다. Gradle을 별도 설치할 필요는 없습니다.
 
-DB 연결 환경 변수 설정과 실행 순서는 [DB 스키마·JPA 검증](docs/DB_SETUP.md)를 먼저 확인합니다. 전체 테스트 중 기동 테스트는 개발 PostgreSQL과 DB_PASSWORD가 필요합니다. Repository 테스트만 실행하려면 Docker 엔진을 켜고 `./gradlew test --tests '*RepositoryTest'`를 사용합니다. 테스트용 DB는 별도로 생성됩니다.
+DB 연결 환경 변수 설정과 실행 순서는 [DB 스키마·JPA 검증](docs/DB_SETUP.md)를 먼저 확인합니다. 전체 DB 통합 테스트는 개발 DB와 분리된 Testcontainers PostgreSQL을 사용합니다. Repository 테스트만 실행하려면 Docker 엔진을 켜고 `./gradlew test --tests '*RepositoryTest'`를 사용합니다. 테스트용 DB는 별도로 생성됩니다.
 
 Windows PowerShell:
 
@@ -52,7 +52,7 @@ macOS/Linux:
 ./gradlew bootRun
 ~~~
 
-기본 HTTP 포트는 8080이며 SERVER_PORT 환경 변수로 변경할 수 있습니다. 현재 업무 엔드포인트와 /health는 미구현으로 404입니다. 기동 테스트는 임의 포트의 실제 HTTP 서버를 실행하여 응답을 확인하며, 업무 API나 DB 동시성 검증을 대체하지 않습니다.
+기본 HTTP 포트는 8080이며 SERVER_PORT 환경 변수로 변경할 수 있습니다. /health는 초기 데이터 생성·검증과 애플리케이션 기동이 완료되면 200을 반환합니다. 초기화가 비활성화됐거나 미완료이면 503입니다. 업무 API는 아직 구현 전이며, 헬스체크 성공을 전체 과제 완료로 해석하지 않습니다.
 
 실행 JAR 경로는 build/libs/Course-Registration-System-0.1.0-SNAPSHOT.jar입니다.
 
@@ -76,3 +76,5 @@ DB 파일은 명명된 볼륨으로 보존합니다. 서버 기동 시 Flyway �
 PR에는 변경 이유, 검증 결과, 미해결 사항을 기록합니다. AI는 반례 검토와 문서 작성·코드 리뷰를 지원하며, AI 검토와 리뷰어의 검토 결과를 구분합니다.
 
 기술 선택과 남은 물리 설계는 [기술 스택·물리 데이터 모델 검토](docs/TECH_STACK_PROPOSAL.md)에 정리합니다. 스택 확정과 실제 환경 구성·실행 검증은 구분합니다.
+
+초기 데이터의 구성·실행 설정·준비 상태는 [초기 데이터 문서](docs/INITIAL_DATA.md), 실제 측정 근거는 [성능 검증 기록](docs/INITIAL_DATA_PERFORMANCE.md)을 참고합니다.

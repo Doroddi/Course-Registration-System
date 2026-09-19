@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.initial-data.enabled=false")
 @Import(SubjectRepositoryTest.DatabaseConfig.class)
 @Transactional
 class SubjectRepositoryTest {

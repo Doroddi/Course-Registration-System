@@ -15,9 +15,13 @@ public class Department {
     @Column(name = "name", length = 100, nullable = false, unique = true)
     private String name;
 
+    @Column(name = "department_code", nullable = false, unique = true)
+    private Short code;
+
     protected Department() {}
 
-    public Department(String name) {
+    public Department(String name, Short code) {
         this.name = name;
+        this.code = code;
     }
 }
