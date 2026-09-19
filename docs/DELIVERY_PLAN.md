@@ -39,7 +39,7 @@
 
 ## 스키마·JPA 구현 검토 상태
 
-2026-09-19: 8개 테이블의 Flyway V1~V9와 엔티티·Repository 구현, PostgreSQL Repository 테스트 130개 통과를 확인했다. [PR 본문 초안](reviews/schema-jpa-pr.md), [AI 자체 리뷰](reviews/schema-jpa-ai-review.md), [실행 결과와 한계](DB_SETUP.md)를 작성했다. 사람 리뷰·원격 게시·최종 PR diff 검증은 아직 완료하지 않았다. 다음 구현 단위는 초기 데이터와 준비 상태이다.
+2026-09-19: 8개 테이블의 Flyway V1~V9와 엔티티·Repository 구현, PostgreSQL Repository 테스트 130개 통과를 확인했다. [PR 본문 초안](reviews/schema-jpa-pr.md), [AI 자체 리뷰](reviews/schema-jpa-ai-review.md), [실행 결과와 한계](DB_SETUP.md)를 작성했다. [스키마 PR #4](https://github.com/Doroddi/Course-Registration-System/pull/4)를 게시하고 선행 환경 브랜치 대비 45개 파일의 diff·소스 일치·문서 링크를 확인했다. 사람 리뷰는 아직 받지 않았다. PR #2 → #3 → #4 순서로 검토하며 선행 PR 병합 후 기준 브랜치를 다시 확인한다. 다음 구현 단위는 초기 데이터와 준비 상태이다.
 
 ## 초기 데이터·준비 상태의 검증 기록 계획
 

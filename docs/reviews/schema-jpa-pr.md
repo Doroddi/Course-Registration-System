@@ -1,4 +1,4 @@
-# PR 초안: feat: 수강신청 도메인 스키마와 JPA 매핑 구현
+# 스키마·JPA 변경 범위와 검증
 
 ## 해결할 문제
 
@@ -49,7 +49,7 @@ AI는 매핑 검토·SQL 제약 보완, 테스트 작성과 실행, 문서 정�
 
 ## 변경 분리 기준
 
-선행 실행 환경 변경 위에 아래 범위를 포함한다. 이 문서는 PR 본문 초안이며 아직 게시하지 않았다.
+[PR #4](https://github.com/Doroddi/Course-Registration-System/pull/4)는 선행 환경 PR #3의 codex/bootstrap-environment를 기준으로 아래 범위를 포함한다. 선행 PR 병합 후 기준 브랜치와 비교 범위를 다시 확인한다.
 
 - build.gradle.kts의 DB·Lombok·테스트 의존성 추가분과 application.yaml의 DB·JPA·Flyway 설정
 - src/main/resources/db/migration/V1~V9
