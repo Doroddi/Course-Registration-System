@@ -59,4 +59,4 @@
 
 2026-09-20: POST /auth/login의 엄격한 JSON 입력 검증·bcrypt 대조·HS256 JWT 발급, Bearer 서명·클레임·정확한 만료 검증과 보호 경로 인증을 구현했다. 전체 300개 테스트가 통과했으며 실패·오류·건너뜀 0, bootJar 성공이다. 인증 관련 96개 중 실제 HTTP·PostgreSQL 통합 테스트는 73개이다. 추가 AI 검토에서 발견한 bcrypt 바이트 경계를 보완한 뒤 인증 102개(HTTP·PostgreSQL 75개)를 재검증해 통과했고 bootJar도 성공했다. 실행 JAR에 테스트용 경로·설정이 포함되지 않았음을 확인했다.
 
-계약·흐름도·검증 범위는 [인증 문서](AUTH_API.md), 게시할 PR의 범위는 [PR 본문 초안](reviews/auth-pr.md), 자체 검토는 [AI 리뷰](reviews/auth-ai-review.md)를 따른다. 사람 리뷰는 아직 받지 않았다. 인증 변경은 초기 데이터 다음의 독립 기능 PR로 묶으며, 검토 후 다음 구현 단위는 강좌·학생·교수 목록 조회이다. 재발급·로그아웃은 별도 설계로 남긴다.
+계약·흐름도·검증 범위는 [인증 문서](AUTH_API.md), 변경 범위는 [PR 설명](reviews/auth-pr.md), 검토는 [AI 리뷰](reviews/auth-ai-review.md)를 따른다. [인증 PR #6](https://github.com/Doroddi/Course-Registration-System/pull/6)을 게시했고 초기 데이터 브랜치 기준 39개 파일의 변경 범위를 확인했다. 검토·병합 순서는 PR #2 → #3 → #4 → #5 → #6이며 선행 PR 병합 후 기준 브랜치를 다시 확인한다. 사람 리뷰는 아직 받지 않았다. 다음 구현 단위는 강좌·학생·교수 목록 조회이며 재발급·로그아웃은 별도 설계로 남긴다.
