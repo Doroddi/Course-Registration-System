@@ -6,7 +6,7 @@
 
 ## 현재 상태
 
-요구사항, 7개 API 계약, 데이터 모델 및 신청·취소 동시성 정책을 정리했습니다. 이 브랜치는 설계 문서 변경을 포함하며, 실행 환경과 업무 API 구현은 후속 PR에서 진행합니다.
+Spring Boot 기본 서버와 기동 테스트, PostgreSQL 개발 환경을 구성했습니다. 업무 API·JPA·초기 데이터 및 애플리케이션 DB 연결은 아직 구현 전입니다. /health는 준비 완료를 의미하므로 현재 제공하지 않습니다.
 
 ## 설계 검토 경로
 
@@ -32,7 +32,40 @@
 
 ## 빌드 및 실행
 
-현재 브랜치에는 초기 Java·Gradle 골격이 있습니다. Windows에서는 ./gradlew.bat build, macOS/Linux에서는 ./gradlew build로 빌드합니다. Spring Boot 서버와 DB 실행 안내는 실행 환경 PR에서 추가합니다. 현재 업무 API와 /health는 구현 전입니다.
+JDK 25를 설치하고 JAVA_HOME을 해당 JDK로 지정합니다. 최초 빌드에는 Gradle 및 Maven Central 접속이 필요합니다. Gradle을 별도 설치할 필요는 없습니다.
+
+Windows PowerShell:
+
+~~~powershell
+.\gradlew.bat test bootJar
+.\gradlew.bat bootRun
+~~~
+
+macOS/Linux:
+
+~~~sh
+./gradlew test bootJar
+./gradlew bootRun
+~~~
+
+기본 HTTP 포트는 8080이며 SERVER_PORT 환경 변수로 변경할 수 있습니다. 현재 업무 엔드포인트와 /health는 미구현으로 404입니다. 기동 테스트는 임의 포트의 실제 HTTP 서버를 실행하여 응답을 확인하며, 업무 API나 DB 동시성 검증을 대체하지 않습니다.
+
+실행 JAR 경로는 build/libs/Course-Registration-System-0.1.0-SNAPSHOT.jar입니다.
+
+## 로컬 PostgreSQL 준비
+
+Docker와 Compose가 실행 가능한 환경에서 아래 순서로 진행합니다.
+
+1. .env.example을 .env로 복사하고 POSTGRES_PASSWORD를 개발용 값으로 변경합니다.
+2. docker compose up -d postgres
+3. docker compose ps 로 상태를 확인합니다.
+4. 사용 후 docker compose stop postgres 로 중지합니다.
+
+호스트 접속은 127.0.0.1:5432, DB 이름은 course_registration, 계정은 course_app입니다. 포트는 .env의 POSTGRES_PORT로 변경할 수 있습니다. 이 계정과 Compose 구성은 로컬 개발용이며 서비스 배포 설정이 아닙니다.
+
+DB 파일은 명명된 볼륨으로 보존합니다. 현재 애플리케이션의 DB 연결·마이그레이션은 아직 적용하지 않았습니다. PostgreSQL 컨테이너의 healthy 상태는 DB 접속 준비만 의미하며, 과제의 데이터 생성 및 API 준비 완료와 구분합니다.
+
+[실행 기반 구현·검증 기록](docs/BOOTSTRAP.md)에 변경 의도와 검증 범위를 기록합니다.
 
 ## 검토 방식
 
