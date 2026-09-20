@@ -1,4 +1,7 @@
 spring:
+  jackson:
+    deserialization:
+      fail-on-trailing-tokens: true
   application:
     name: course-registration-system
   datasource:
@@ -23,6 +26,10 @@ app:
   enrollment:
     academic-year: ${ENROLLMENT_YEAR:2026}
     term: ${ENROLLMENT_TERM:2}
+  jwt:
+    secret-base64: ${JWT_SECRET_BASE64}
+    issuer: ${JWT_ISSUER}
+    audience: ${JWT_AUDIENCE}
 
 server:
   port: ${SERVER_PORT:8080}
