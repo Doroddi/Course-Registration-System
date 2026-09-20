@@ -12,7 +12,7 @@ $logs = Join-Path $root ".tools/seed-check-$runId"
 New-Item -ItemType Directory $logs | Out-Null
 $ownedContainer = $false
 $appProcess = $null
-$keys = @('DB_URL', 'DB_USERNAME', 'DB_PASSWORD', 'INITIAL_STUDENT_PASSWORD', 'SERVER_PORT', 'ENROLLMENT_YEAR', 'ENROLLMENT_TERM')
+$keys = @('DB_URL', 'DB_USERNAME', 'DB_PASSWORD', 'INITIAL_STUDENT_PASSWORD', 'SERVER_PORT', 'ENROLLMENT_YEAR', 'ENROLLMENT_TERM', 'JWT_SECRET_BASE64', 'JWT_ISSUER', 'JWT_AUDIENCE')
 $previous = @{}
 foreach ($key in $keys) { $previous[$key] = [Environment]::GetEnvironmentVariable($key, 'Process') }
 
@@ -87,6 +87,13 @@ try {
     $env:DB_URL = "jdbc:postgresql://127.0.0.1:$port/seed_check"
     $env:DB_USERNAME = 'seed_check'
     $env:INITIAL_STUDENT_PASSWORD = 'startup-verification-only'
+    # 검증 프로세스 전용 키를 한 번 만들고 재시작 검증에서도 재사용한다.
+    $jwtBytes = New-Object byte[] 32
+    $jwtRandom = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $jwtRandom.GetBytes($jwtBytes) } finally { $jwtRandom.Dispose() }
+    $env:JWT_SECRET_BASE64 = [Convert]::ToBase64String($jwtBytes)
+    $env:JWT_ISSUER = 'seed-verification'
+    $env:JWT_AUDIENCE = 'seed-verification-api'
     $ready = $false
     for ($i = 0; $i -lt 60; $i++) {
         & $docker exec $container pg_isready -h 127.0.0.1 -U seed_check -d seed_check *> $null

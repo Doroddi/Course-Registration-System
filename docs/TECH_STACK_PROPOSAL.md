@@ -14,7 +14,7 @@
 | DB | PostgreSQL 18.6 | 실제 행 잠금·READ COMMITTED·COUNT 동작을 개발과 테스트에서 동일 DB로 검증 |
 | 데이터 접근(확정) | Spring Data JPA | 엔티티 매핑과 영속성 관리를 사용하며 생성 SQL·트랜잭션 동작을 검증 |
 | 트랜잭션 | 서비스 계층의 Spring 트랜잭션 | 신청·취소 전체를 하나의 커밋/롤백 단위로 구성 |
-| 인증 | Spring Security | 인증·접근 제어를 공통 계층에서 처리. JWT 키·알고리즘·재발급 정책은 별도 설계 |
+| 인증 | Spring Security | Resource Server로 무상태 Bearer 인증, HS256·환경변수 키·30분 만료를 적용. 재발급·로그아웃은 별도 설계 |
 | 스키마 관리 | Flyway | 스키마 변경을 버전별 기록. 실제 의존성·DB 지원 조합은 도입 시 검증 |
 | 실행·테스트 | 로컬 DB는 Docker Compose, 통합 테스트는 Testcontainers PostgreSQL | 재현 가능한 DB 환경과 실제 DB 동시성 검증. Docker 실행 환경 필요 |
 
