@@ -2,7 +2,7 @@
 
 상태: 주요 정책 확정·구현 세부 검토 / 구현·성능 측정 미실시
 
-요구사항 D55~D56의 검사 순서, D61의 별도 학생 존재 확인 제외, D62의 취소 학기 제한, D63의 시간표 신청 순서 정렬을 구현하기 위한 설계이다. 학생·강좌 행 잠금, READ COMMITTED, 잠금 후 조회, 인원 COUNT, 증가 신청 ID는 D64~D66으로 확정했다. 취소 잠금 순서·대기 실패 처리·강좌 정보 변경 제한은 D67~D69로 확정했다. 기술 스택은 D73~D74에 따라 Spring Data JPA와 PostgreSQL 18.6으로 확정했다. 잠금은 D75에 따라 JPA 우선 적용 후 FOR NO KEY UPDATE 생성 여부를 확인하고 필요 시 native query로 전환한다. 증가 BIGINT 신청 PK와 학생·강좌 UNIQUE는 D76으로 확정했다. 생성 구문과 인덱스는 후속 검토한다.
+요구사항 D55~D56의 검사 순서, D61의 별도 학생 존재 확인 제외, D62의 취소 학기 제한, D63의 시간표 신청 순서 정렬을 구현하기 위한 설계이다. 학생·강좌 행 잠금, READ COMMITTED, 잠금 후 조회, 인원 COUNT, 증가 신청 ID는 D64~D66으로 확정했다. 취소 잠금 순서·대기 실패 처리·강좌 정보 변경 제한은 D67~D69로 확정했다. 기술 스택은 D73~D74에 따라 Spring Data JPA와 PostgreSQL 18.6으로 확정했다. 잠금은 D75에 따라 JPA 우선 적용 후 FOR NO KEY UPDATE 생성 여부를 확인하고 필요 시 native query로 전환한다. 증가 BIGINT 신청 PK와 학생·강좌 UNIQUE는 D76으로 확정했다. 생성 구문과 초기 인덱스는 D81·D83을 따라 V9에 구현했다. 저장 범위의 검증은 [DB 검증 기록](DB_SETUP.md)을 따른다.
 
 ## 확정 사항과 구현 제안
 
@@ -12,7 +12,7 @@
 | 잠금 적용 방침(확정) | 두 행 모두 JPA @Lock(PESSIMISTIC_WRITE) 우선 적용. FOR NO KEY UPDATE 생성·동작 확인 후 필요 시 native query 전환(D75) | 서로의 신청 변경은 직렬화하되 외래 키 확인의 KEY SHARE와 불필요한 충돌 완화 |
 | 격리 수준(확정) | READ COMMITTED | 잠금을 기다린 뒤 실행하는 조회가 앞선 커밋을 반영 |
 | 신청 인원(확정) | ENROLLMENT의 강좌별 COUNT | 초기 구현에서 별도 인원 카운터의 동기화 부담을 피함 |
-| 신청 순서(확정) | ENROLLMENT.enrollment_id 증가 ID로 정렬. BIGINT IDENTITY PK는 구현 제안 | 같은 학생의 성공한 신청 저장 순서를 재현 |
+| 신청 순서(확정) | ENROLLMENT.enrollment_id 증가 ID로 정렬. BIGINT IDENTITY(CACHE 1)는 D81에 따라 구현 | 같은 학생의 성공한 신청 저장 순서를 재현 |
 | 중복 방어 | UNIQUE(student_number, offering_id) 유지 | 동일 개설 강좌 중복을 DB에서도 방어 |
 
 학생 행 잠금은 존재 확인용 exists 쿼리가 아니라 동시 요청을 직렬화하기 위한 조회이다. 학생 삭제를 고려하지 않는 정책을 유지한다. 학생 행의 프로필 값을 수정할 필요는 없다.
@@ -69,7 +69,7 @@
 
 ## 신청 순서와 데이터 모델
 
-제안하는 ENROLLMENT 구조는 다음과 같다.
+V9에 구현한 ENROLLMENT 구조는 다음과 같다. 신청·취소의 서비스 트랜잭션은 후속 구현 대상이다.
 
 | 필드·제약 | 용도 |
 |---|---|
