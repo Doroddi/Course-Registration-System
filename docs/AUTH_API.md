@@ -48,10 +48,24 @@ JSON 해석 → 필드 값 검증 → 계정 인증 → JWT 발급 순서로 처
 | 학번 누락·null·9자리 범위 오류 | 400 / INVALID_PARAMETER | studentNumber는 필수이며 9자리 정수여야 합니다. |
 | 비밀번호 누락·null·빈 값·공백 | 400 / INVALID_PARAMETER | password는 필수이며 공백이 아닌 문자열이어야 합니다. |
 | 없는 학번·비밀번호 불일치·UTF-8 72바이트 초과 | 401 / INVALID_CREDENTIALS | 학번 또는 비밀번호가 올바르지 않습니다. |
-| 보호 경로의 토큰 누락·위조·만료·검증 실패 | 401 / UNAUTHORIZED | 인증이 필요합니다. |
+| 보호 경로의 토큰 누락 | 401 / TOKEN_REQUIRED | 로그인이 필요합니다. |
+| 서명·그 밖의 조건은 정상이고 만료된 토큰 | 401 / TOKEN_EXPIRED | 인증이 만료되었습니다. 다시 로그인해주세요. |
+| 보호 경로의 그 밖의 토큰·Authorization 검증 실패 | 401 / INVALID_TOKEN | 유효하지 않은 인증 정보입니다. |
 | 인증 후 권한 부족 | 403 / FORBIDDEN | 접근 권한이 없습니다. |
 
-현재 업무 접근 조건은 로그인 여부뿐이며 별도 역할·권한 체계는 도입하지 않는다. 403은 권한 거절 발생 시의 공통 응답이다. 토큰 인증 실패에는 WWW-Authenticate: Bearer를 반환하며 내부 검증 예외나 토큰 원문을 응답하지 않는다.
+현재 업무 접근 조건은 로그인 여부뿐이며 별도 역할·권한 체계는 도입하지 않는다. 403은 권한 거절 발생 시의 공통 응답이다. 토큰 누락에는 WWW-Authenticate: Bearer, 전달된 인증 정보의 실패에는 WWW-Authenticate: Bearer error="invalid_token"을 반환한다. 내부 검증 예외나 토큰 원문은 응답하지 않는다.
+
+## 인증 실패 원인과 진단
+
+검증 실패는 내부 원인으로 분류하고 외부에는 누락·만료·그 밖의 유효하지 않은 토큰으로 변환한다. 클라이언트가 서버에서 발급한 클레임을 수정하게 하지 않고, 누락에는 로그인, 정상 토큰의 만료에는 재로그인을 안내한다. [Bearer 오류 응답 표준](https://www.rfc-editor.org/rfc/rfc6750.html#section-3.1)을 따른다.
+
+- 토큰 구문·허용 알고리즘·서명 검증 후 필수 클레임, 학번, 발급자, 대상, 발급 시각, 유효기간, 사용 시작 시각을 검사한다. 만료 검사는 마지막에 수행한다.
+- 만료와 다른 오류가 겹치면 다른 오류를 우선한다. 서명이 틀린 토큰, 발급자가 다른 만료 토큰, 숫자 sub가 문자열로 변환된 만료 토큰은 TOKEN_EXPIRED로 안내하지 않는다.
+- 내부 원인은 TOKEN_MISSING, MALFORMED_AUTHORIZATION, MALFORMED_TOKEN, UNSUPPORTED_ALGORITHM, INVALID_SIGNATURE, MISSING_CLAIM, INVALID_SUBJECT, ISSUER_MISMATCH, AUDIENCE_MISMATCH, ISSUED_AT_IN_FUTURE, INVALID_LIFETIME, NOT_YET_VALID, TOKEN_EXPIRED로 구분한다. 분류할 수 없는 검증 실패는 INVALID_TOKEN으로 남긴다.
+- 보호 경로 인증 실패 시 서버가 UUID 요청 식별자를 생성해 X-Request-Id 응답 헤더로 전달한다. 요청에서 같은 이름의 헤더를 보내도 재사용하지 않는다. JSON은 기존 code·message 구조를 유지한다.
+- 공통 보안 오류 처리기는 `event=JWT_REJECTED reason=<원인> requestId=<응답과 같은 ID>`를 기록한다. 토큰·Authorization 원문, 비밀번호, 비밀키, 클레임 값, 라이브러리 예외 메시지·스택은 이 로그에 포함하지 않는다. [OWASP 로깅 가이드](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)를 따른다.
+
+JwtClaimsValidator는 조건별 OAuth2Error를 반환한다. JwtConfiguration은 decoder 단계의 실패와 클레임 실패를 JwtRejectedException으로 연결하고, ApiSecurityErrorHandler가 안전한 진단 기록과 외부 응답을 담당한다. 토큰 누락·헤더 형식 오류는 클레임 validator 전에 실패하므로 공통 handler에서도 분류한다.
 
 ## JWT 정책
 
@@ -109,7 +123,8 @@ flowchart LR
 | AuthController | 검증 → 인증 → 발급 순서와 HTTP 성공 응답 연결 |
 | JwtConfiguration·JwtClaimsValidator | 키·시계·서명기·검증기 구성과 클레임 정책 |
 | SecurityConfiguration | 공개 경로, Bearer 인증과 무상태 접근 제어 |
-| ApiExceptionHandler·ApiSecurityErrorHandler | MVC 및 보안 필터의 공통 오류 본문 |
+| JwtFailureReason·JwtRejectedException | 내부 실패 원인과 안전한 예외 전달 |
+| ApiExceptionHandler·ApiSecurityErrorHandler | MVC 및 보안 필터의 오류 본문, 인증 실패 로그와 요청 ID |
 
 Spring Boot 4.1.1 BOM의 Spring Security 7.1.1을 사용한다. `spring-boot-starter-security-oauth2-resource-server`로 HTTP 보안과 Resource Server를 구성하며 JWT 발급·검증에 `spring-security-oauth2-jose`를 사용한다. 요청 해석은 Boot 4의 기본 Jackson 3에 맞춘다. [Spring Boot Security](https://docs.spring.io/spring-boot/reference/web/spring-security.html), [Jackson 지원](https://docs.spring.io/spring-boot/reference/features/json.html)을 확인했다.
 
@@ -171,3 +186,23 @@ AuthIntegrationTest는 4개 테스트 학생 계정을 실제 DB에 저장하고
 생성한 실행 JAR에서 인증 코드와 Spring Security 7.1.1 의존성을 확인했다. 테스트용 ProtectedProbe와 테스트 application.properties는 포함되지 않았다. 이 확인은 JAR 구성 검사이며, 배포 환경의 HTTPS·운영 부하 검증을 뜻하지 않는다.
 
 이전 단위 검증에서는 AuthService 5개, JWT 설정을 포함한 선택 테스트 28개, 발급 서비스를 포함한 선택 테스트 24개가 각각 통과했다. 위 전체 실행과 중복되므로 합산하지 않는다. [AI 자체 검토](reviews/auth-ai-review.md)와 [PR 본문 초안](reviews/auth-pr.md)에 변경 의도와 후속 범위를 정리했다.
+## 인증 실패 진단 검증
+
+2026-09-20, 인증 실패 응답과 내부 진단을 분리한 뒤 실행했다.
+
+```powershell
+.\gradlew.bat test --tests 'com.doroddi.courseregistration.student.auth.*' --tests 'com.doroddi.courseregistration.config.JwtConfigurationTest' bootJar --no-daemon
+```
+
+인증 관련 **157개 통과**, 실패·오류·건너뜀 0, bootJar 성공. 6개 테스트 클래스가 실행됐으며 전체 명령은 2분 47초가 걸렸다. 이번 실행은 인증 변경의 영향 범위에 대한 검증이며 이전 전체·선택 실행 결과와 합산하지 않는다.
+
+| 테스트 | 실행 수 | 확인 내용 |
+|---|---:|---|
+| AuthIntegrationTest | 80 | 실제 HTTP·PostgreSQL 로그인과 인증 회귀, 외부 실패 코드·헤더, 만료와 다른 오류 중첩, 서버 생성 요청 ID |
+| JwtFailureDiagnosticsTest | 31 | 실제 HS256 서명·고정 시계로 필수 클레임 누락, 원본 sub 타입, 발급자·대상·시간·유효기간·서명 오류의 내부 원인과 우선순위 |
+| ApiSecurityErrorHandlerTest | 19 | 내부 원인→외부 응답 매핑, resolver와 decoder 실패 구분, 응답·로그 ID 일치, 클라이언트 ID 미사용, 원문·예외 스택 미기록 |
+| AuthServiceTest | 9 | 비밀번호 대조·공통 실패·공백·bcrypt 바이트 경계 회귀 |
+| JwtTokenServiceTest | 4 | 기존 발급·서명·시각 정책 회귀 |
+| JwtConfigurationTest | 14 | 기존 필수 설정·키 길이·잘못된 키 처리 회귀 |
+
+요구사항 T66·T118·T121의 만료·실패 진단 사례를 검증했다. 실행 JAR에 새 인증 진단 코드가 포함되고 테스트 전용 경로·클래스·설정은 포함되지 않았음을 확인했다. 검증한 8개 운영·테스트 변경 파일은 테스트 실행 중 변경되지 않았다.

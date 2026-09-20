@@ -112,11 +112,11 @@ ID는 BIGINT·Java Long(D76), 학점은 정수 1~6(D77)으로 확정했다. API 
 
 | 상황 | HTTP 상태 | code |
 |---|---|---|
-| 토큰 누락·위조·만료 | 401 Unauthorized | UNAUTHORIZED / 인증이 필요합니다. |
+| 토큰 누락·위조·만료 | 401 Unauthorized | TOKEN_REQUIRED / TOKEN_EXPIRED / INVALID_TOKEN — 인증 명세 참조 |
 | 음수 page, size 범위 위반, 파라미터 형식 오류·중복·지원하지 않는 이름 | 400 Bad Request | INVALID_PARAMETER |
 | 형식은 유효하지만 존재하지 않는 departmentId | 404 Not Found | DEPARTMENT_NOT_FOUND |
 
-400·404 오류 본문은 code와 message를 제공한다. 401 오류는 UNAUTHORIZED와 "인증이 필요합니다."를 반환한다. code는 프로그램이 오류 종류를 구분하는 값이며 message는 잘못된 항목과 허용 범위 또는 형식을 설명한다.
+400·404 오류 본문은 code와 message를 제공한다. 401 오류는 누락 TOKEN_REQUIRED·만료 TOKEN_EXPIRED·그 밖의 실패 INVALID_TOKEN으로 구분하며 메시지는 [인증 명세](AUTH_API.md)를 따른다. code는 프로그램이 오류 종류를 구분하는 값이며 message는 잘못된 항목과 허용 범위 또는 형식을 설명한다.
 
 ### 잘못된 페이지 크기
 

@@ -4,7 +4,7 @@
 
 [요구사항 D32~D37, D39~D40, D42](REQUIREMENTS.md)에 따라 확정된 요청과 응답 구조를 정리한다. 확정된 오류 정책도 함께 정리한다.
 
-로그인 후에만 조회할 수 있다. Authorization: Bearer <accessToken>으로 JWT를 전달하며, 토큰 누락·위조·만료는 401이다(D50~D51). 인증을 먼저 확인하며 401 오류는 UNAUTHORIZED와 "인증이 필요합니다."를 반환한다. [인증 명세](AUTH_API.md)를 따른다.
+로그인 후에만 조회할 수 있다. Authorization: Bearer <accessToken>으로 JWT를 전달하며, 토큰 누락·위조·만료는 401이다(D50~D51). 인증을 먼저 확인하며 401 오류는 누락 TOKEN_REQUIRED·만료 TOKEN_EXPIRED·그 밖의 실패 INVALID_TOKEN으로 구분한다. [인증 명세](AUTH_API.md)를 따른다.
 
 ## 요청
 
@@ -32,12 +32,12 @@ GET /students?departmentId=10&grade=2&page=0&size=20
 | size | 적용된 페이지 크기 |
 | totalElements | 적용한 학과·학년 조건에 맞는 전체 학생 수 |
 | totalPages | 조건에 맞는 전체 학생 수를 페이지 크기로 나눈 값을 올림 |
-| content[].studentNumber | 연도 4자리 + 뒤 5자리로 구성된 9자리 JSON 숫자 |
+| content[].studentNumber | 연도 4자리 + 발급 당시 학과 코드 2자리 + 학생 번호 3자리인 9자리 JSON 숫자 |
 | content[].name | 학생 이름 |
 | content[].grade | 학년, 1~4의 정수 |
 | content[].departmentName | 학생의 소속 학과명 문자열 |
 
-학번은 DB INTEGER, Java Integer로 사용한다. 연도의 의미·허용 범위와 뒤 5자리의 부여 규칙은 미정이다. 아래 학번은 형식 설명용 예시이며 일련번호 규칙을 확정한 것이 아니다. 학과 ID는 BIGINT·Java Long(D76)이며 API 표현 상한은 후속 확정한다.
+학번은 DB INTEGER, Java Integer로 사용한다. D33에 따라 연도 4자리 + 발급 당시 학과 코드 2자리 + 학생 번호 3자리이며 초기 데이터는 연도 2020~2026, 학생 번호 100~499로 생성한다. 전과하더라도 학번은 변경하지 않고 현재 소속 학과를 기준으로 조회한다. 연도의 의미와 현재 학년의 관계는 후속 확정한다. 학과 ID는 BIGINT·Java Long(D76)이며 API 표현 상한은 후속 확정한다.
 
 ### 조회 조건에 맞는 학생이 1명인 예시
 
@@ -47,7 +47,7 @@ GET /students?departmentId=10&grade=2&page=0&size=20
 {
   "content": [
     {
-      "studentNumber": 202600001,
+      "studentNumber": 202610100,
       "name": "김민준",
       "grade": 2,
       "departmentName": "컴퓨터공학부"

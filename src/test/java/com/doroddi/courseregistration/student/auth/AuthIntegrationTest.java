@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Stream;
 import javax.crypto.SecretKey;
 
@@ -189,7 +190,7 @@ class AuthIntegrationTest {
                 "Content-Type", "application/json", "Authorization", "Bearer " + token);
         assertThat(authenticated.statusCode()).isEqualTo(200);
         assertThat(authenticated.headers().allValues("Set-Cookie")).isEmpty();
-        assertUnauthorized(exchange("GET", "/test/authenticated", null));
+        assertTokenRequired(exchange("GET", "/test/authenticated", null));
     }
 
     @Test
@@ -278,14 +279,14 @@ class AuthIntegrationTest {
             "POST /enrollments", "DELETE /enrollments/1", "GET /me/timetable"})
     void protectsAllPlannedBusinessPathsBeforeInputHandling(String route) throws Exception {
         String[] parts = route.split(" ");
-        assertUnauthorized(exchange(parts[0], parts[1], "{broken", "Content-Type", "application/json"));
+        assertTokenRequired(exchange(parts[0], parts[1], "{broken", "Content-Type", "application/json"));
         verifyNoInteractions(students);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"Bearer malformed", "Bearer ", "Basic dGVzdDp0ZXN0", "Bearer a b", "Bearer a, Bearer b"})
     void rejectsMalformedOrUnsupportedAuthorization(String header) throws Exception {
-        assertUnauthorized(exchange("GET", "/test/authenticated", null, "Authorization", header));
+        assertInvalidToken(exchange("GET", "/test/authenticated", null, "Authorization", header));
     }
 
     @ParameterizedTest
@@ -293,7 +294,7 @@ class AuthIntegrationTest {
     void rejectsMissingRequiredClaim(String missing) throws Exception {
         Map<String, Object> claims = validClaims();
         claims.remove(missing);
-        assertUnauthorized(withToken(sign(claims)));
+        assertInvalidToken(withToken(sign(claims)));
     }
 
     @ParameterizedTest
@@ -301,7 +302,7 @@ class AuthIntegrationTest {
     void rejectsSignedButInvalidClaims(String name, Object value) throws Exception {
         Map<String, Object> claims = validClaims();
         claims.put(name, value);
-        assertUnauthorized(withToken(sign(claims)));
+        assertInvalidToken(withToken(sign(claims)));
     }
 
     static Stream<Arguments> invalidClaims() {
@@ -325,10 +326,10 @@ class AuthIntegrationTest {
     void rejectsWrongSigningKeyAndAlgorithmAndUnsignedToken() throws Exception {
         byte[] wrongKey = key.getEncoded().clone();
         wrongKey[0] ^= 1;
-        assertUnauthorized(withToken(sign(validClaims(), JWSAlgorithm.HS256, wrongKey)));
-        assertUnauthorized(withToken(sign(validClaims(), JWSAlgorithm.HS512, new byte[64])));
+        assertInvalidToken(withToken(sign(validClaims(), JWSAlgorithm.HS256, wrongKey)));
+        assertInvalidToken(withToken(sign(validClaims(), JWSAlgorithm.HS512, new byte[64])));
         String unsigned = new com.nimbusds.jwt.PlainJWT(com.nimbusds.jwt.JWTClaimsSet.parse(validClaims())).serialize();
-        assertUnauthorized(withToken(unsigned));
+        assertInvalidToken(withToken(unsigned));
     }
 
     @Test
@@ -338,7 +339,7 @@ class AuthIntegrationTest {
         altered.put("sub", Integer.toString(OTHER_STUDENT));
         String[] parts = original.split("\\.");
         String tampered = parts[0] + "." + new Payload(altered).toBase64URL() + "." + parts[2];
-        assertUnauthorized(withToken(tampered));
+        assertInvalidToken(withToken(tampered));
     }
 
     @Test
@@ -348,9 +349,46 @@ class AuthIntegrationTest {
         when(clock.instant()).thenReturn(expiry.minusNanos(1));
         assertThat(withToken(token).statusCode()).isEqualTo(200);
         when(clock.instant()).thenReturn(expiry);
-        assertUnauthorized(withToken(token));
+        assertTokenExpired(withToken(token));
         when(clock.instant()).thenReturn(expiry.plusSeconds(1));
-        assertUnauthorized(withToken(token));
+        assertTokenExpired(withToken(token));
+    }
+
+    @ParameterizedTest
+    @MethodSource("expiredClaimsWithAnotherFailure")
+    void doesNotAdvertiseExpiryWhenAnotherClaimIsInvalid(String name, Object value) throws Exception {
+        Map<String, Object> claims = expiredClaims();
+        claims.put(name, value);
+        assertInvalidToken(withToken(sign(claims)));
+    }
+
+    static Stream<Arguments> expiredClaimsWithAnotherFailure() {
+        return Stream.of(
+                Arguments.of("iss", "other-issuer"),
+                Arguments.of("sub", 202610100),
+                Arguments.of("iat", NOW.minusSeconds(1801).getEpochSecond()));
+    }
+
+    @Test
+    void doesNotAdvertiseExpiryForAnUntrustedSignature() throws Exception {
+        byte[] wrongKey = key.getEncoded().clone();
+        wrongKey[0] ^= 1;
+        assertInvalidToken(withToken(sign(expiredClaims(), JWSAlgorithm.HS256, wrongKey)));
+    }
+
+    @Test
+    void createsFreshRequestIdsInsteadOfReflectingTheRequestHeader() throws Exception {
+        String suppliedId = "client-controlled-request-id";
+        HttpResponse<String> first = exchange("GET", "/test/authenticated", null,
+                "X-Request-Id", suppliedId);
+        HttpResponse<String> second = exchange("GET", "/test/authenticated", null,
+                "X-Request-Id", suppliedId);
+        assertTokenRequired(first);
+        assertTokenRequired(second);
+        assertThat(first.headers().firstValue("X-Request-Id").orElseThrow())
+                .isNotEqualTo(suppliedId)
+                .isNotEqualTo(second.headers().firstValue("X-Request-Id").orElseThrow());
+        assertThat(first.body()).doesNotContain(suppliedId);
     }
 
     @Test
@@ -363,9 +401,9 @@ class AuthIntegrationTest {
     @Test
     void refusesTokensInQueryAndCookies() throws Exception {
         String token = sign(validClaims());
-        assertUnauthorized(exchange("GET", "/test/authenticated?access_token=" + token, null));
-        assertUnauthorized(exchange("GET", "/test/authenticated", null, "Cookie", "accessToken=" + token));
-        assertUnauthorized(exchange("POST", "/test/authenticated", "access_token=" + token,
+        assertTokenRequired(exchange("GET", "/test/authenticated?access_token=" + token, null));
+        assertTokenRequired(exchange("GET", "/test/authenticated", null, "Cookie", "accessToken=" + token));
+        assertTokenRequired(exchange("POST", "/test/authenticated", "access_token=" + token,
                 "Content-Type", "application/x-www-form-urlencoded"));
     }
 
@@ -414,9 +452,25 @@ class AuthIntegrationTest {
         return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
-    private void assertUnauthorized(HttpResponse<String> response) {
-        assertError(response, 401, "UNAUTHORIZED", "인증이 필요합니다.");
-        assertThat(response.headers().firstValue("WWW-Authenticate")).contains("Bearer");
+    private void assertTokenRequired(HttpResponse<String> response) {
+        assertAuthenticationError(response, "TOKEN_REQUIRED", "로그인이 필요합니다.", "Bearer");
+    }
+
+    private void assertTokenExpired(HttpResponse<String> response) {
+        assertAuthenticationError(response, "TOKEN_EXPIRED", "인증이 만료되었습니다. 다시 로그인해주세요.",
+                "Bearer error=\"invalid_token\"");
+    }
+
+    private void assertInvalidToken(HttpResponse<String> response) {
+        assertAuthenticationError(response, "INVALID_TOKEN", "유효하지 않은 인증 정보입니다.",
+                "Bearer error=\"invalid_token\"");
+    }
+
+    private void assertAuthenticationError(HttpResponse<String> response, String code, String message, String challenge) {
+        assertError(response, 401, code, message);
+        assertThat(response.headers().firstValue("WWW-Authenticate")).contains(challenge);
+        String requestId = response.headers().firstValue("X-Request-Id").orElseThrow();
+        assertThat(UUID.fromString(requestId).toString()).isEqualTo(requestId);
         assertThat(response.headers().allValues("Set-Cookie")).isEmpty();
     }
 
@@ -433,6 +487,13 @@ class AuthIntegrationTest {
         return new HashMap<>(Map.of("sub", Integer.toString(STUDENT), "iss", properties.issuer(),
                 "aud", List.of(properties.audience()), "iat", NOW.getEpochSecond(),
                 "exp", NOW.plusSeconds(1800).getEpochSecond()));
+    }
+
+    private Map<String, Object> expiredClaims() {
+        Map<String, Object> claims = validClaims();
+        claims.put("iat", NOW.minusSeconds(1800).getEpochSecond());
+        claims.put("exp", NOW.getEpochSecond());
+        return claims;
     }
 
     private String sign(Map<String, Object> claims) throws Exception {
