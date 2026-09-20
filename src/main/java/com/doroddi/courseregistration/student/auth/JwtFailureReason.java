@@ -1,0 +1,18 @@
+package com.doroddi.courseregistration.student.auth;
+
+public enum JwtFailureReason {
+    TOKEN_MISSING,
+    MALFORMED_AUTHORIZATION,
+    MALFORMED_TOKEN,
+    UNSUPPORTED_ALGORITHM,
+    INVALID_SIGNATURE,
+    INVALID_SUBJECT,
+    MISSING_CLAIM,
+    ISSUER_MISMATCH,
+    AUDIENCE_MISMATCH,
+    ISSUED_AT_IN_FUTURE,
+    INVALID_LIFETIME,
+    NOT_YET_VALID,
+    TOKEN_EXPIRED,
+    INVALID_TOKEN
+}

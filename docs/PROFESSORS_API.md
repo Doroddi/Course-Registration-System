@@ -4,7 +4,7 @@
 
 [요구사항 D38, D40~D42](REQUIREMENTS.md)에 따른 계약이다.
 
-로그인 후에만 조회할 수 있다. Authorization: Bearer <accessToken>으로 JWT를 전달하며, 토큰 누락·위조·만료는 401이다(D50~D51). 인증을 먼저 확인하며 401 오류는 UNAUTHORIZED와 "인증이 필요합니다."를 반환한다. [인증 명세](AUTH_API.md)를 따른다.
+로그인 후에만 조회할 수 있다. Authorization: Bearer <accessToken>으로 JWT를 전달하며, 토큰 누락·위조·만료는 401이다(D50~D51). 인증을 먼저 확인하며 401 오류는 누락 TOKEN_REQUIRED·만료 TOKEN_EXPIRED·그 밖의 실패 INVALID_TOKEN으로 구분한다. [인증 명세](AUTH_API.md)를 따른다.
 
 ## 요청
 

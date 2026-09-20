@@ -29,7 +29,7 @@ Authorization: Bearer <accessToken>
 | 상황 | HTTP 상태 | code | message |
 |---|---|---|---|
 | 개설 강좌 ID가 양의 정수 형식이 아님 | 400 | INVALID_PARAMETER | 잘못된 요청입니다. |
-| 토큰 누락·위조·만료 | 401 | UNAUTHORIZED | 인증이 필요합니다. |
+| 토큰 누락·위조·만료 | 401 | TOKEN_REQUIRED / TOKEN_EXPIRED / INVALID_TOKEN | [인증 명세](AUTH_API.md)의 원인별 메시지 |
 | 개설 강좌가 존재하지 않음 | 404 | COURSE_OFFERING_NOT_FOUND | 존재하지 않는 강좌입니다. |
 | 취소 대상 학기가 아님 | 409 | INVALID_ENROLLMENT_TERM | 신청 대상 학기가 아닙니다. |
 
