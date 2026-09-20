@@ -20,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.initial-data.enabled=false")
 @Import(CourseOfferingRepositoryTest.DatabaseConfig.class)
 @Transactional
 class CourseOfferingRepositoryTest {
@@ -34,13 +34,24 @@ class CourseOfferingRepositoryTest {
     @Autowired DepartmentRepository departments;
     @Autowired EntityManager entityManager;
 
+    @Test
+    void countsOnlyOfferingsInRequestedYearAndTerm() {
+        repository.saveAndFlush(offering(2026, (short) 2, "101", "대상 강좌", (short) 3, 30));
+        repository.saveAndFlush(offering(2026, (short) 1, "101", "이전 학기", (short) 3, 30));
+        repository.saveAndFlush(offering(2025, (short) 2, "101", "이전 연도", (short) 3, 30));
+        entityManager.clear();
+
+        assertEquals(1L, repository.countByAcademicYearAndTerm(2026, (short) 2));
+        assertEquals(0L, repository.countByAcademicYearAndTerm(2027, (short) 2));
+    }
+
     private Subject subject;
     private Department department;
 
     @org.junit.jupiter.api.BeforeEach
     void prepareParents() {
         subject = subjects.saveAndFlush(new Subject("00123"));
-        department = departments.saveAndFlush(new Department("컴퓨터공학부"));
+        department = departments.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
     }
 
     private CourseOffering offering(Integer year, Short term, String code, String name, Short credits, Integer capacity) {

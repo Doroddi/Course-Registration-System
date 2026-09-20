@@ -5,6 +5,10 @@ spring:
     url: ${DB_URL:jdbc:postgresql://127.0.0.1:5432/course_registration}
     username: ${DB_USERNAME:course_app}
     password: ${DB_PASSWORD}
+    hikari:
+      data-source-properties:
+        # JDBC 배치의 INSERT를 여러 VALUES를 가진 문장으로 묶는다.
+        reWriteBatchedInserts: true
   jpa:
     hibernate:
       # 스키마 변경은 Flyway가 담당하고 JPA는 매핑만 검증한다.
@@ -14,6 +18,11 @@ spring:
   sql:
     init:
       mode: never
+
+app:
+  enrollment:
+    academic-year: ${ENROLLMENT_YEAR:2026}
+    term: ${ENROLLMENT_TERM:2}
 
 server:
   port: ${SERVER_PORT:8080}

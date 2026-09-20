@@ -18,6 +18,7 @@ erDiagram
 
     DEPARTMENT {
         bigint department_id PK
+        smallint department_code UK
         string name
     }
     STUDENT {
@@ -83,7 +84,7 @@ SUBJECT에는 과목 코드 PK를 두고 COURSE_OFFERING에 강좌명과 학점�
 
 ## 식별자와 제약조건
 
-- 학번은 유일하고 불변이며 연도 4자리 + 뒤 5자리의 고정 9자리 숫자이다(D33). 학생 PK와 수강신청의 학번 FK는 DB INTEGER를 사용한다. Java에서는 Integer, API에서는 JSON 숫자로 표현한다(D34). 연도 의미·허용 범위와 뒤 5자리 부여 규칙은 미정이며, 고정 길이·형식은 별도 검증한다.
+- 학번은 유일하고 불변이며 연도 4자리 + 발급 당시 학과 코드 2자리 + 학생 인덱스 3자리의 고정 9자리 숫자이다(D33). 학생 PK와 수강신청의 학번 FK는 DB INTEGER를 사용한다. Java에서는 Integer, API에서는 JSON 숫자로 표현한다(D34). 초기 데이터는 연도 2020~2026, 학생 인덱스 100~499를 사용한다. 현재 소속은 학번에서 추출하지 않고 department_id로 조회하며 전과 후에도 학번은 유지한다. 학과 코드는 별도 SMALLINT 필드로 관리하고 10~99 범위·필수·유일 제약을 적용한다(D86).
 - 개설 강좌는 별도 PK를 사용하고 `(academic_year, term, offering_code)`는 UNIQUE이다.
 - 수강신청의 `(student_number, offering_id)`와 강의 담당의 `(professor_id, offering_id)`는 각각 유일해야 한다. 신청은 별도 BIGINT PK와 UNIQUE, 강의 담당은 두 FK의 복합 PK를 사용한다(D76).
 - 관계는 외래 키로 표현하고 참조되는 부모 삭제는 제한한다(D78). 취소는 신청 행만 명시적으로 삭제한다.
@@ -124,3 +125,5 @@ SUBJECT에는 과목 코드 PK를 두고 COURSE_OFFERING에 강좌명과 학점�
 JPA 매핑은 필요한 방향의 ManyToOne(LAZY)을 사용한다(D78). 예를 들어 Enrollment는 Student와 CourseOffering을 참조하며, 부모의 신청 컬렉션은 필요한 경우에만 추가한다. API는 DTO를 반환한다. Flyway로 DDL을 관리하고 ddl-auto=validate로 매핑을 확인한다.
 
 학과명은 시스템 내에서 유일하며 DEPARTMENT.name에 UNIQUE를 둔다(D84). PK는 내부 식별을 담당하고 학과명 유일성은 사용자에게 표시되는 이름의 중복을 방지한다. 앞뒤 공백 처리 정책은 별도 결정한다.
+
+D86에 따라 V10과 Department.code에 10~99의 유일한 학과 코드를 반영했다. 기존 department_id와 FK는 유지한다. V10은 기존 학과 행이 없는 DB를 전제로 하며 데이터가 있는 이전 스키마의 코드 이행은 별도 작업이다.

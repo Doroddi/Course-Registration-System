@@ -20,7 +20,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest
+@SpringBootTest(properties = "app.initial-data.enabled=false")
 @Import(StudentRepositoryTest.DatabaseConfig.class)
 @Transactional
 class StudentRepositoryTest {
@@ -42,7 +42,7 @@ class StudentRepositoryTest {
     @Autowired JdbcTemplate jdbcTemplate;
 
     private Department saveDepartment() {
-        return departmentRepository.saveAndFlush(new Department("컴퓨터공학부"));
+        return departmentRepository.saveAndFlush(new Department("컴퓨터공학부", (short) 10));
     }
 
     @ParameterizedTest
