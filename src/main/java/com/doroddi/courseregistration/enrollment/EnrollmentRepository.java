@@ -3,6 +3,7 @@ package com.doroddi.courseregistration.enrollment;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
@@ -28,6 +29,15 @@ public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
                                @Param("offeringId") Long offeringId);
 
     long countByCourseOffering_Id(Long offeringId);
+
+    // 부모 행 잠금 이후 실행한다. 엔티티를 읽지 않고 본인·대상 강좌의 관계만 삭제한다.
+    @Modifying
+    @Query("""
+            delete from Enrollment e
+            where e.student.studentNumber = :studentNumber and e.courseOffering.id = :offeringId
+            """)
+    int deleteRegistration(@Param("studentNumber") Integer studentNumber,
+                           @Param("offeringId") Long offeringId);
 
     interface RegisteredCourse {
         Long getOfferingId();

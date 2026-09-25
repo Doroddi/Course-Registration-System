@@ -347,6 +347,219 @@ public class EnrollmentIntegrationTest {
         assertThat(count(target)).isZero();
         assertThat(enroll(target,token).statusCode()).isEqualTo(201);
     }
+    @Test
+    void cancellationDeletesOnlyOwnExactOfferingAndIsIdempotent() throws Exception {
+        long target=course(3,30,1), other=course(3,30,2);
+        jdbc.update("update course_offering set subject_code=(select subject_code from course_offering where offering_id=?) where offering_id=?",target,other);
+        seed(STUDENT,target); seed(STUDENT,other); seed(STUDENT+1,target);
+        noContent(cancel(Long.toString(target),token));
+        assertThat(count(target)).isEqualTo(1);
+        assertThat(count(other)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select student_number from enrollment where offering_id=?",Integer.class,target)).isEqualTo(STUDENT+1);
+        noContent(cancel(Long.toString(target),token));
+        assertThat(total()).isEqualTo(2);
+        var sql=SqlCapture.rows.stream().map(Observation::sql).toList();
+        int studentLock=index(sql,"from student","for no key update");
+        int offeringLock=index(sql,"from course_offering","for no key update");
+        int deletion=index(sql,"delete from enrollment");
+        assertThat(studentLock).isGreaterThanOrEqualTo(0);
+        assertThat(offeringLock).isGreaterThan(studentLock);
+        assertThat(deletion).isGreaterThan(offeringLock);
+        assertThat(sql).noneMatch(q->q.contains("select count") || q.contains("from class_meeting"));
+        for(Observation row:SqlCapture.rows) {
+            assertThat(row.readOnly()).isFalse();
+            assertThat(row.isolation()).isEqualTo(Connection.TRANSACTION_READ_COMMITTED);
+        }
+    }
+
+    @Test
+    void cancellationWithoutAnyEnrollmentSucceedsAndAllowsLeadingZeros() throws Exception {
+        long target=course(3,30,1);
+        noContent(cancel("000"+target,token));
+        assertThat(total()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings={"0","-1","+1","1.0","1e1","abc","9223372036854775808","%201","1%20","%EF%BC%91"})
+    void cancellationRejectsInvalidPathBeforeDatabase(String path) throws Exception {
+        error(cancel(path,token),400,"INVALID_PARAMETER","잘못된 요청입니다.");
+        assertThat(SqlCapture.rows).isEmpty();
+    }
+
+    @Test
+    void cancellationOfMissingOfferingReturns404() throws Exception {
+        error(cancel(Long.toString(Long.MAX_VALUE),token),404,"COURSE_OFFERING_NOT_FOUND","존재하지 않는 강좌입니다.");
+        assertThat(SqlCapture.rows).hasSize(1);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"year","term"})
+    void cancellationOutsideTargetTermPreservesEnrollment(String kind) throws Exception {
+        long target=course(3,30,1); seed(STUDENT,target);
+        jdbc.update(kind.equals("year") ? "update course_offering set academic_year=2025 where offering_id=?"
+                : "update course_offering set term=1 where offering_id=?",target);
+        error(cancel(Long.toString(target),token),409,"INVALID_ENROLLMENT_TERM",null);
+        assertThat(count(target)).isEqualTo(1);
+        assertThat(SqlCapture.rows.stream().map(Observation::sql)).noneMatch(q->q.contains("for no key update"));
+    }
+
+    @ParameterizedTest @ValueSource(strings={"missing","expired","forged"})
+    void cancellationAuthenticatesBeforePathValidation(String kind) throws Exception {
+        String bearer=null, code="TOKEN_REQUIRED";
+        if(kind.equals("expired")) {
+            when(clock.instant()).thenReturn(NOW.minusSeconds(1800));
+            bearer=tokens.issue(STUDENT);
+            when(clock.instant()).thenReturn(NOW);
+            code="TOKEN_EXPIRED";
+        } else if(kind.equals("forged")) {
+            int p=token.lastIndexOf('.')+1;
+            bearer=token.substring(0,p)+(token.charAt(p)=='A'?'B':'A')+token.substring(p+1);
+            code="INVALID_TOKEN";
+        }
+        error(cancel("invalid",bearer),401,code,null);
+        assertThat(SqlCapture.rows).isEmpty();
+    }
+
+    @Test
+    void cancellationAllowsReenrollmentWithNewIdAndPreservesOtherOrder() throws Exception {
+        long a=course(3,30,1), b=course(3,30,2);
+        assertThat(enroll(a,token).statusCode()).isEqualTo(201);
+        assertThat(enroll(b,token).statusCode()).isEqualTo(201);
+        long oldId=jdbc.queryForObject("select enrollment_id from enrollment where student_number=? and offering_id=?",Long.class,STUDENT,a);
+        noContent(cancel(Long.toString(a),token));
+        assertThat(enroll(a,token).statusCode()).isEqualTo(201);
+        long newId=jdbc.queryForObject("select enrollment_id from enrollment where student_number=? and offering_id=?",Long.class,STUDENT,a);
+        assertThat(newId).isGreaterThan(oldId);
+        assertThat(jdbc.queryForList("select offering_id from enrollment where student_number=? order by enrollment_id",Long.class,STUDENT)).containsExactly(b,a);
+    }
+
+    @Test
+    void concurrentRepeatedCancellationsBothSucceed() throws Exception {
+        long target=course(3,30,1); seed(STUDENT,target); seed(STUDENT+1,target);
+        var a=cancelAsync(target,token); var b=cancelAsync(target,token);
+        noContent(a.get(15,TimeUnit.SECONDS)); noContent(b.get(15,TimeUnit.SECONDS));
+        assertThat(count(target)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select student_number from enrollment where offering_id=?",Integer.class,target)).isEqualTo(STUDENT+1);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"enroll","cancel"})
+    void enrollmentAndCancellationFollowStudentLockCommitOrder(String first) throws Exception {
+        long target=course(3,30,1);
+        if(first.equals("cancel")) seed(STUDENT,target);
+        CountDownLatch locked=new CountDownLatch(1), release=new CountDownLatch(1);
+        try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
+            var holder=pool.submit(()->new TransactionTemplate(transactionManager).execute(status->{
+                if(first.equals("enroll")) service.enroll(STUDENT,target); else service.cancel(STUDENT,target);
+                locked.countDown();
+                try { if(!release.await(10,TimeUnit.SECONDS))throw new IllegalStateException("release timeout"); }
+                catch(InterruptedException e) { Thread.currentThread().interrupt(); throw new RuntimeException(e); }
+                return true;
+            }));
+            try {
+                assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+                var next=first.equals("enroll")?cancelAsync(target,token):async(target,token);
+                awaitWaiter("student");
+                release.countDown();
+                assertThat(holder.get(15,TimeUnit.SECONDS)).isTrue();
+                var response=next.get(15,TimeUnit.SECONDS);
+                if(first.equals("enroll")) noContent(response); else assertThat(response.statusCode()).isEqualTo(201);
+            } finally { release.countDown(); }
+        }
+        assertThat(count(target)).isEqualTo(first.equals("enroll")?0:1);
+    }
+
+    @Test
+    void enrollmentSeesSeatFreedByPrecedingCancellationCommit() throws Exception {
+        long target=course(3,1,1); seed(STUDENT,target);
+        CountDownLatch locked=new CountDownLatch(1), release=new CountDownLatch(1);
+        try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
+            var holder=pool.submit(()->new TransactionTemplate(transactionManager).execute(status->{
+                service.cancel(STUDENT,target);
+                locked.countDown();
+                try { if(!release.await(10,TimeUnit.SECONDS))throw new IllegalStateException("release timeout"); }
+                catch(InterruptedException e) { Thread.currentThread().interrupt(); throw new RuntimeException(e); }
+                return true;
+            }));
+            try {
+                assertThat(locked.await(10,TimeUnit.SECONDS)).isTrue();
+                var next=async(target,tokens.issue(STUDENT+1));
+                awaitWaiter("course_offering");
+                release.countDown();
+                assertThat(holder.get(15,TimeUnit.SECONDS)).isTrue();
+                assertThat(next.get(15,TimeUnit.SECONDS).statusCode()).isEqualTo(201);
+            } finally { release.countDown(); }
+        }
+        assertThat(count(target)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select student_number from enrollment where offering_id=?",Integer.class,target)).isEqualTo(STUDENT+1);
+    }
+
+    @ParameterizedTest @ValueSource(strings={"student","course_offering"})
+    void cancellationLockTimeoutPreservesEnrollmentAndReleasesLocks(String table) throws Exception {
+        long target=course(3,30,1); seed(STUDENT,target);
+        try(Connection holder=connection()) {
+            lock(holder,table,table.equals("student")?"student_number":"offering_id",table.equals("student")?STUDENT:target);
+            error(cancel(Long.toString(target),token),503,"ENROLLMENT_TEMPORARILY_UNAVAILABLE",null);
+            assertThat(count(target)).isEqualTo(1);
+            holder.rollback();
+        }
+        noContent(cancel(Long.toString(target),token));
+        assertThat(count(target)).isZero();
+    }
+
+    @Test
+    void cancellationDeadlockRollsBackAndPreservesEnrollment() throws Exception {
+        long target=course(3,30,1); seed(STUDENT,target);
+        try(Connection holder=connection(); var pool=Executors.newVirtualThreadPerTaskExecutor()) {
+            try(var statement=holder.createStatement()) {
+                statement.execute("set local deadlock_timeout='10s'");
+                statement.execute("set local lock_timeout='10s'");
+            }
+            lock(holder,"course_offering","offering_id",target);
+            var pending=cancelAsync(target,token);
+            awaitWaiter("course_offering");
+            var reverse=pool.submit(()->{lock(holder,"student","student_number",STUDENT); return true;});
+            error(pending.get(15,TimeUnit.SECONDS),503,"ENROLLMENT_TEMPORARILY_UNAVAILABLE",null);
+            assertThat(reverse.get(15,TimeUnit.SECONDS)).isTrue();
+            holder.rollback();
+        }
+        assertThat(count(target)).isEqualTo(1);
+        noContent(cancel(Long.toString(target),token));
+    }
+
+    @Test
+    void cancellationDeleteFailureRollsBackAndReleasesLocks() throws Exception {
+        long target=course(3,30,1); seed(STUDENT,target);
+        jdbc.execute("""
+                create function test_fail_delete() returns trigger language plpgsql as $$
+                begin raise exception 'test delete failure'; return old; end $$
+                """);
+        jdbc.execute("create trigger test_fail_delete after delete on enrollment for each row execute function test_fail_delete()");
+        try {
+            assertThat(cancel(Long.toString(target),token).statusCode()).isEqualTo(500);
+            assertThat(count(target)).isEqualTo(1);
+        } finally {
+            jdbc.execute("drop trigger test_fail_delete on enrollment");
+            jdbc.execute("drop function test_fail_delete()");
+        }
+        noContent(cancel(Long.toString(target),token));
+        assertThat(count(target)).isZero();
+    }
+
+    private HttpRequest cancelRequest(String path,String bearer) {
+        var builder=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+"/enrollments/"+path))
+                .timeout(Duration.ofSeconds(15)).DELETE();
+        if(bearer!=null) builder.header("Authorization","Bearer "+bearer);
+        return builder.build();
+    }
+    private HttpResponse<String> cancel(String path,String bearer) throws Exception {
+        return client.send(cancelRequest(path,bearer),HttpResponse.BodyHandlers.ofString());
+    }
+    private CompletableFuture<HttpResponse<String>> cancelAsync(long id,String bearer) {
+        return client.sendAsync(cancelRequest(Long.toString(id),bearer),HttpResponse.BodyHandlers.ofString());
+    }
+    private void noContent(HttpResponse<String> response) {
+        assertThat(response.statusCode()).withFailMessage(response.body()).isEqualTo(204);
+        assertThat(response.body()).isEmpty();
+    }
     private long course(int credits,int capacity,int day) {
         String code=Integer.toString(sequence.incrementAndGet());
         jdbc.update("insert into subject(subject_code) values (?)",code);
