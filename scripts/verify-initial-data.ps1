@@ -1,5 +1,5 @@
-param([switch]$FirstOnly, [switch]$ApiSmoke, [switch]$LoadBaseline, [switch]$SqlStats, [int]$AcademicYear = 2026, [int]$Term = 2,
-    [int]$LoadWarmupSeconds = 10, [int]$LoadMeasurementSeconds = 30, [int[]]$LoadUsers = @(10,50,100))
+param([switch]$FirstOnly, [switch]$ApiSmoke, [switch]$LoadBaseline, [switch]$CapacityCheck, [switch]$Diagnostics, [switch]$SqlStats, [int]$AcademicYear = 2026, [int]$Term = 2,
+    [int]$LoadWarmupSeconds = 10, [int]$LoadMeasurementSeconds = 30, [int[]]$LoadUsers = @(10,50,100), [switch]$HostDiagnostics)
 # 별도 임시 PostgreSQL 컨테이너에서 실행 JAR의 초기화·재시작을 검증한다.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -13,6 +13,15 @@ $logs = Join-Path $root ".tools/seed-check-$runId"
 New-Item -ItemType Directory $logs | Out-Null
 $ownedContainer = $false
 $appProcess = $null
+$hostCollector = $null
+$metricsPort = 0
+if ($Diagnostics) {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
+    $listener.Start()
+    $metricsPort = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    $SqlStats = $true
+}
 $keys = @('DB_URL', 'DB_USERNAME', 'DB_PASSWORD', 'INITIAL_STUDENT_PASSWORD', 'SERVER_PORT', 'ENROLLMENT_YEAR', 'ENROLLMENT_TERM', 'JWT_SECRET_BASE64', 'JWT_ISSUER', 'JWT_AUDIENCE')
 $previous = @{}
 foreach ($key in $keys) { $previous[$key] = [Environment]::GetEnvironmentVariable($key, 'Process') }
@@ -40,11 +49,13 @@ function Launch([string]$stage, [bool]$expectSuccess) {
     $stderr = Join-Path $logs "$stage.err.log"
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $observedNotReady = $false
-    $script:appProcess = Start-Process -FilePath $java -ArgumentList @('-jar', ('"' + $jar.FullName + '"'), '--server.port=0', '--app.initial-data.enabled=true') -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    $arguments = @('-jar', ('"' + $jar.FullName + '"'), '--server.port=0', '--app.initial-data.enabled=true')
+    if ($Diagnostics) { $arguments += @('--spring.profiles.active=diagnostics', "--management.server.port=$metricsPort") }
+    $script:appProcess = Start-Process -FilePath $java -ArgumentList $arguments -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     while ($watch.Elapsed.TotalSeconds -lt 240) {
         $body = ReadLiveLog $stdout
         $readyMatch = [regex]::Match($body, 'Initial data ready: mode=(created|validated), elapsedMs=(\d+)')
-        $port = [regex]::Match($body, 'Tomcat started on port (\d+)').Groups[1].Value
+        $port = [regex]::Matches($body, 'Tomcat started on port (\d+)') | ForEach-Object { [int]$_.Groups[1].Value } | Where-Object { $_ -ne $metricsPort } | Select-Object -First 1
         if ($port) {
             $response = $null
             try { $response = Invoke-WebRequest "http://127.0.0.1:$port/health" -SkipHttpErrorCheck -TimeoutSec 2 } catch {}
@@ -109,6 +120,17 @@ function StopOwnedApp {
     $script:appProcess = $null
 }
 try {
+    if ($HostDiagnostics) {
+        $hostCollector=Start-Job -FilePath (Join-Path $PSScriptRoot 'collect-host-load.ps1') -ArgumentList $logs
+        $deadline=[DateTime]::UtcNow.AddSeconds(30)
+        while(-not(Test-Path (Join-Path $logs 'host-ready'))) {
+            if($hostCollector.State -eq 'Failed' -or [DateTime]::UtcNow -gt $deadline){throw 'Host collector startup failed'}
+            Start-Sleep -Milliseconds 200
+        }
+        # A quiet observation window, not an assertion that other apps are idle.
+        Start-Sleep -Seconds 15
+        [pscustomobject]@{event='before-server'; timestampUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json -Compress | Set-Content (Join-Path $logs 'host-events.jsonl') -Encoding utf8
+    }
     $env:ENROLLMENT_YEAR = [string]$AcademicYear
     $env:ENROLLMENT_TERM = [string]$Term
     $env:DB_PASSWORD = [Guid]::NewGuid().ToString('N')
@@ -138,7 +160,7 @@ try {
     if ($SqlStats) { Sql 'CREATE EXTENSION pg_stat_statements;' | Out-Null }
     $first = Launch 'first' $true
     if ($ApiSmoke) { $first | Add-Member -NotePropertyName apiSmoke -NotePropertyValue (VerifyApis $first.port) }
-    if ($LoadBaseline) { & (Join-Path $PSScriptRoot 'measure-load-baseline.ps1') -ApiPort $first.port -Container $container -OutputDirectory $logs -WarmupSeconds $LoadWarmupSeconds -MeasurementSeconds $LoadMeasurementSeconds -Users $LoadUsers }
+    if ($LoadBaseline -or $CapacityCheck) { & (Join-Path $PSScriptRoot 'measure-load-baseline.ps1') -ApiPort $first.port -Container $container -OutputDirectory $logs -WarmupSeconds $LoadWarmupSeconds -MeasurementSeconds $LoadMeasurementSeconds -Users $LoadUsers -CapacityCheck:$CapacityCheck -CapacityOnly:(!$LoadBaseline) -MetricsPort $metricsPort }
     $first | ConvertTo-Json -Depth 4 -Compress | Write-Output
     StopOwnedApp
     if ($SqlStats) {
@@ -174,4 +196,11 @@ try {
     StopOwnedApp
     if ($ownedContainer) { & $docker rm --force --volumes $container | Out-Null }
     foreach ($key in $keys) { [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process') }
+    if($hostCollector){
+        New-Item -ItemType File (Join-Path $logs 'host-stop') | Out-Null
+        $hostCollector | Wait-Job -Timeout 15 | Out-Null
+        if($hostCollector.State -ne 'Completed') { $hostCollector | Stop-Job; $hostCollector | Remove-Job; throw 'Host collector failed' }
+        $hostCollector | Receive-Job -ErrorAction Stop | Out-Null
+        $hostCollector | Remove-Job
+    }
 }
