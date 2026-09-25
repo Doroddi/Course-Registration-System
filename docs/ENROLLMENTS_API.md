@@ -1,6 +1,6 @@
 # 수강신청 API
 
-상태: 명세 초안 / 서버 미구현
+상태: POST /enrollments 구현 / 검증 결과는 아래 구현·검증 기록 참조
 
 [요구사항 D50~D51, D54~D61](REQUIREMENTS.md)에 따른 요청·성공 응답 계약이다. 신청 제약은 요구사항 I01~I05와 확정 정책을 따른다.
 
@@ -21,7 +21,7 @@ Content-Type: application/json
 - courseOfferingId는 신청할 개설 강좌의 ID이다. 과목 코드가 아니라 학기·분반이 특정된 개설 강좌를 지정한다.
 - 학생은 검증된 JWT의 sub로 식별하며 요청 본문에 학번을 받지 않는다.
 - 서버에 설정된 신청 대상 연도·학기의 강좌만 신청할 수 있다.
-- courseOfferingId는 필수이며 양의 정수인 JSON 숫자만 허용한다. 누락·null·0·음수·소수·문자열·불리언은 400 INVALID_PARAMETER와 "잘못된 요청입니다." 메시지로 거절한다. 물리 타입은 BIGINT·Java Long(D76)이며 API 입력 상한은 후속 확정한다.
+- courseOfferingId는 필수이며 양의 정수인 JSON 숫자만 허용한다. 누락·null·0·음수·소수·문자열·불리언은 400 INVALID_PARAMETER와 "잘못된 요청입니다." 메시지로 거절한다. 물리 타입은 BIGINT·Java Long(D76)이며 입력 범위는 1~9223372036854775807(Long.MAX_VALUE)이다. 정수의 소수점·지수 표기와 중복 필드는 거절한다.
 - 잘못된 JSON과 courseOfferingId 외의 필드도 같은 400 응답으로 거절한다. 요청에 studentNumber를 추가해도 거절한다.
 
 ## 성공 응답
@@ -93,13 +93,46 @@ Content-Type: application/json
 
 ## 후속 결정
 
-- courseOfferingId의 API 입력 상한, JSON 중복 필드 및 정수의 소수점·지수 표기 허용 여부
-- D75의 잠금 적용 방침에 따른 실제 SQL 확인, 대기 제한 설정 방식, DB 제약조건·인덱스와 동시 요청 검증. 자동 재시도는 현재 미적용이며 후속 검토
+- 부하 측정에 따른 잠금 대기 한도 조정
+- 자동 재시도는 현재 미적용이며 후속 검토
 
-검증 계획은 요구사항의 신청 관련 시나리오와 T75~T94을 따른다. 서버·동시성 테스트는 아직 실행하지 않았다.
+검증 계획은 요구사항의 신청 관련 시나리오와 T75~T94을 따른다. 구현 및 실제 실행 결과는 아래에 구분한다.
 
 ## 확정된 잠금 실패 응답
 
-D68에 따라 잠금 획득 시도별 3초 대기 한도로 시작한다. 시간 초과 또는 교착 오류 시 전체 롤백 후 503 ENROLLMENT_TEMPORARILY_UNAVAILABLE과 메시지 일시적으로 요청을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.를 반환한다. 서버 자동 재시도는 현재 적용하지 않는다. 3초는 초기 설정으로 부하 테스트 후 조정한다. 검증 계획은 T102~T103이며 아직 실행하지 않았다.
+D68에 따라 잠금 획득 시도별 3초 대기 한도로 시작한다. 시간 초과 또는 교착 오류 시 전체 롤백 후 503 ENROLLMENT_TEMPORARILY_UNAVAILABLE과 메시지 일시적으로 요청을 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.를 반환한다. 서버 자동 재시도는 현재 적용하지 않는다. 3초는 초기 설정으로 부하 테스트 후 조정한다. 검증 계획은 T102~T103이며 실행 결과는 아래에 구분한다.
 
 신청 처리 중 강좌의 학기·과목 코드·학점·수업 시간·정원 변경은 지원하지 않는다(D69).
+
+## 구현·검증 기록
+
+2026-09-25: POST /enrollments를 구현했다. EnrollmentController는 인증된 JWT sub와 요청 ID를 전달하고, EnrollmentService는 하나의 READ COMMITTED 트랜잭션에서 조건 검사와 저장을 처리한다. 학생·강좌 Repository의 PESSIMISTIC_WRITE가 각각 FOR NO KEY UPDATE를 생성하는 것을 실제 PostgreSQL 18.6에서 확인했다. 잠금 자체에 native query 대체는 필요하지 않았다.
+
+학생 잠금 이후 신청 내역을 조회하고, 학생 조건을 통과한 뒤 강좌 잠금을 획득한다. 정원 COUNT는 강좌 잠금 이후 별도 SQL로 실행한다. 외래 키 확인용 KEY SHARE와 잠금이 공존하는 것도 검증했다. 대기 제한은 select set_config('lock_timeout', '3s', true)로 현재 트랜잭션에만 적용한다. SQLSTATE 55P03(잠금 대기 실패)·40P01(교착 상태)은 롤백 후 503으로 변환하며 다른 DB 장애는 잠금 실패로 변환하지 않는다.
+
+입력 구현은 BIGINT·Long 범위와 기존 인증 API의 엄격한 JSON 처리에 맞췄다. courseOfferingId 하나만 받고 양의 Long 정수 토큰을 허용한다. 중복 필드·소수점·지수 표기·후행 JSON은 400으로 거절하며 해당 요청은 DB에 접근하지 않는다.
+
+실행 명령:
+
+~~~text
+./gradlew test --tests '*EnrollmentIntegrationTest' --tests '*EnrollmentExceptionHandlerTest' bootJar --no-daemon
+~~~
+
+신청 테스트 53개(HTTP·PostgreSQL 통합 47개, 오류 분류 단위 6개)가 통과했다. 실패·오류·건너뜀 0이며 bootJar도 성공했다. 테스트는 Testcontainers의 별도 PostgreSQL에서 수행한다.
+
+| 검증 대상 | 실제 확인 |
+|---|---|
+| 인증·입력·대상 학기·업무 오류 | 인증 우선, 입력 오류 시 DB 접근 없음, 명세의 첫 조건 오류 반환 |
+| 서로 다른 학생 10명·마지막 한 자리 | 성공 1건, COURSE_FULL 9건, 최종 신청 1건 |
+| 동일 학생의 동시 신청 | 동일 강좌·동일 과목·18학점·시간 충돌 보호, 독립된 두 강좌는 모두 성공 |
+| 잠금 대기 후 조회 | 앞선 트랜잭션의 신청 커밋이 학점 검사·정원 COUNT에 반영 |
+| 잠금 SQL 및 순서 | 학생 → 신청 내역 조회 → 강좌 → 정원 COUNT → INSERT, READ COMMITTED |
+| 실패 후 회복 | 학생·강좌 잠금 대기 초과, 실제 교착 오류, INSERT 실패 시 롤백 및 후속 신청 성공 |
+| 시간 경계 | 인접 시간 허용, 다른 요일 허용, 복수 수업 시간 중 충돌 검출 |
+| 연결 재사용 | 트랜잭션 종료 후 lock_timeout이 원래 값으로 복구 |
+
+교착 테스트는 테스트용 트랜잭션에서만 잠금 순서를 뒤집어 PostgreSQL 오류 처리를 검증한다. 운영 신청 경로는 학생 → 강좌 순서를 유지한다. 동시성 테스트는 불변 조건과 오류 처리를 검증하며 처리량·지연 시간의 성능 평가를 대신하지 않는다. 요청 도착 순서를 보장하는 대기열은 구현하지 않았다. 취소·시간표 조회와 신청·취소 간 경합은 후속 구현 범위이다.
+
+공식 근거: [Spring Data JPA 잠금](https://docs.spring.io/spring-data/jpa/reference/jpa/locking.html), [PostgreSQL 18 행 잠금](https://www.postgresql.org/docs/18/explicit-locking.html), [트랜잭션 잠금 대기 설정](https://www.postgresql.org/docs/18/runtime-config-client.html). 2026-09-25 확인.
+
+전체 회귀 검증: 2026-09-25에 ./gradlew test bootJar --no-daemon을 실행하여 31개 테스트 클래스의 541개 테스트가 통과했다(실패·오류·건너뜀 0). bootJar 성공, 실행 JAR에서 테스트 코드 제외를 확인했다. 종료 단계에서 Hikari 연결 재시도 경고가 출력됐으며 빌드와 테스트는 정상 종료했다.
