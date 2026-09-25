@@ -59,6 +59,23 @@ public class EnrollmentService {
         // IDENTITY INSERT와 커밋이 모두 성공한 뒤에만 Controller가 201을 반환한다.
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void cancel(Integer studentNumber, Long offeringId) {
+        var offering = offerings.findById(offeringId).orElseThrow(() -> new EnrollmentRejectedException(
+                "COURSE_OFFERING_NOT_FOUND", "존재하지 않는 강좌입니다.", HttpStatus.NOT_FOUND));
+        if (offering.getAcademicYear() != term.academicYear() || offering.getTerm() != term.term()) {
+            throw conflict("INVALID_ENROLLMENT_TERM", "신청 대상 학기가 아닙니다.");
+        }
+        entityManager.createNativeQuery("select set_config('lock_timeout', '3s', true)").getSingleResult();
+        // 신청과 같은 순서를 지켜 동일 학생의 신청·취소와 강좌 인원 변경을 함께 직렬화한다.
+        students.findForEnrollment(studentNumber)
+                .orElseThrow(() -> new IllegalStateException("인증된 학생의 신청 상태를 처리할 수 없습니다."));
+        offerings.findForEnrollment(offeringId)
+                .orElseThrow(() -> new IllegalStateException("취소 중 개설 강좌가 사라졌습니다."));
+        // Enrollment를 영속성 컨텍스트에 로드하지 않으므로 bulk DELETE 후 clear가 필요하지 않다.
+        // 0건 삭제도 성공이다. 정원·학점·시간표 조건은 취소에 적용하지 않는다.
+        enrollments.deleteRegistration(studentNumber, offeringId);
+    }
     private EnrollmentRejectedException conflict(String code, String message) {
         return new EnrollmentRejectedException(code, message, HttpStatus.CONFLICT);
     }
