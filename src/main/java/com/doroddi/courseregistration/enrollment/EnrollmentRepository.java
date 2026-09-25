@@ -1,10 +1,40 @@
 package com.doroddi.courseregistration.enrollment;
 
+import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface EnrollmentRepository extends JpaRepository<Enrollment, Long> {
+    @Query("""
+            select o.id as offeringId, o.subject.subjectCode as subjectCode, o.credits as credits
+            from Enrollment e join e.courseOffering o
+            where e.student.studentNumber = :studentNumber
+              and o.academicYear = :year and o.term = :term
+            """)
+    List<RegisteredCourse> findRegisteredCourses(@Param("studentNumber") Integer studentNumber,
+                                                          @Param("year") int year, @Param("term") short term);
+
+    @Query("""
+            select count(m) from Enrollment e, ClassMeeting m, ClassMeeting requested
+            where e.student.studentNumber = :studentNumber
+              and e.courseOffering.academicYear = :year and e.courseOffering.term = :term
+              and m.courseOffering = e.courseOffering and requested.courseOffering.id = :offeringId
+              and m.dayOfWeek = requested.dayOfWeek
+              and m.startsAt < requested.endsAt and requested.startsAt < m.endsAt
+            """)
+    long countScheduleConflicts(@Param("studentNumber") Integer studentNumber,
+                               @Param("year") int year, @Param("term") short term,
+                               @Param("offeringId") Long offeringId);
+
+    long countByCourseOffering_Id(Long offeringId);
+
+    interface RegisteredCourse {
+        Long getOfferingId();
+        String getSubjectCode();
+        Short getCredits();
+    }
+
     @Query("""
             select count(o) from CourseOffering o
             where o.academicYear = :year and o.term = :term
