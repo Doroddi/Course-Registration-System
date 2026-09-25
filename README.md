@@ -6,7 +6,7 @@
 
 ## 현재 상태
 
-Spring Boot 서버 기반, Flyway V1~V10, 8개 테이블의 JPA 엔티티·Repository, 초기 데이터 생성·검증과 /health를 구현했습니다. 빈 DB에서는 동적으로 데이터를 생성하고 정상 재시작에서는 기존 데이터를 보존합니다. 대상 학기는 설정으로 관리합니다. 학번·비밀번호 로그인과 JWT 발급·검증, 보호 경로 인증을 구현했으며 목록·신청 등 업무 API와 신청 동시성 처리는 후속 구현 대상입니다.
+Spring Boot 서버 기반, Flyway V1~V10, 8개 테이블의 JPA 엔티티·Repository, 초기 데이터 생성·검증과 /health를 구현했습니다. 빈 DB에서는 동적으로 데이터를 생성하고 정상 재시작에서는 기존 데이터를 보존합니다. 대상 학기는 설정으로 관리합니다. 학번·비밀번호 로그인과 JWT 발급·검증, 학생·교수·강좌 목록, 수강신청·취소·내 시간표 API를 구현했습니다. 신청·취소는 학생 → 강좌 비관적 잠금으로 제약을 보호하며 관련 동시성 테스트를 통과했습니다. 전체 요구사항 대조와 대규모 부하 검증은 후속 범위입니다.
 
 확정 스택은 Java 25, Spring Boot 4.1.1, Spring Data JPA, PostgreSQL 18.6입니다. Gradle Wrapper는 9.7.1을 사용합니다. 현재 빌드에는 MVC·Validation·JPA·Flyway·PostgreSQL 드라이버·Lombok·Testcontainers를 적용했습니다. 인증에는 Spring Security Resource Server와 HS256 JWT를 적용했습니다.
 
@@ -17,14 +17,14 @@ Spring Boot 서버 기반, Flyway V1~V10, 8개 테이블의 JPA 엔티티·Repos
 3. [첫 설계 PR 초안](docs/reviews/initial-design-pr.md): 검토 범위와 주요 질문
 4. [설계 결정 정리](prompts/0001-design-conversation.md): 요구사항 해석과 대안 검토 과정
 
-5. [강좌 목록 API](docs/API.md): 요청·응답·오류 계약 초안
-6. [학생 목록 API](docs/STUDENTS_API.md): 요청·응답·오류 계약 초안
-7. [교수 목록 API](docs/PROFESSORS_API.md): 요청·응답·오류 계약 초안
+5. [강좌 목록 API](docs/API.md): 요청·응답·오류 계약과 구현 범위
+6. [학생 목록 API](docs/STUDENTS_API.md): 요청·응답·오류 계약과 구현 범위
+7. [교수 목록 API](docs/PROFESSORS_API.md): 요청·응답·오류 계약과 구현 범위
 8. [로그인 API](docs/AUTH_API.md): 구현된 로그인·JWT 인증의 계약, 구성도와 검증 결과
-9. [수강신청 API](docs/ENROLLMENTS_API.md): 요청·응답·오류 계약 초안
-10. [수강취소 API](docs/CANCELLATIONS_API.md): 대상 학기 제한과 요청·응답 초안
-11. [내 시간표 API](docs/TIMETABLE_API.md): 신청 순서 정렬과 응답 구성 초안
-12. [신청·취소 동시성 설계](docs/CONCURRENCY_DESIGN.md): 잠금·인원 계산·신청 순서 정책과 구현 제안
+9. [수강신청 API](docs/ENROLLMENTS_API.md): 요청·응답·오류 계약과 구현 범위
+10. [수강취소 API](docs/CANCELLATIONS_API.md): 대상 학기 제한·반복 취소 및 검증 결과
+11. [내 시간표 API](docs/TIMETABLE_API.md): 신청 순서 정렬·조회 일관성과 검증 결과
+12. [신청·취소 동시성 설계](docs/CONCURRENCY_DESIGN.md): 잠금·인원 계산·신청 순서 정책과 구현 검증
 
 ## 개발 및 검증 계획
 
@@ -52,7 +52,7 @@ macOS/Linux:
 ./gradlew bootRun
 ~~~
 
-기본 HTTP 포트는 8080이며 SERVER_PORT 환경 변수로 변경할 수 있습니다. /health는 초기 데이터 생성·검증과 애플리케이션 기동이 완료되면 200을 반환합니다. 초기화가 비활성화됐거나 미완료이면 503입니다. POST /auth/login으로 토큰을 발급받을 수 있습니다. 목록·신청·취소·시간표 업무 API는 아직 구현 전이며, 헬스체크 성공을 전체 과제 완료로 해석하지 않습니다.
+기본 HTTP 포트는 8080이며 SERVER_PORT 환경 변수로 변경할 수 있습니다. /health는 초기 데이터 생성·검증과 애플리케이션 기동이 완료되면 200을 반환합니다. 초기화가 비활성화됐거나 미완료이면 503입니다. POST /auth/login으로 토큰을 발급받을 수 있습니다. 목록·신청·취소·시간표 업무 API는 Bearer 토큰 인증 후 사용할 수 있습니다. 헬스체크 성공을 전체 요구사항·부하 검증 완료로 해석하지 않습니다.
 
 실행 JAR 경로는 build/libs/Course-Registration-System-0.1.0-SNAPSHOT.jar입니다.
 
