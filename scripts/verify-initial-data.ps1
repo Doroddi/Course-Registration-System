@@ -1,4 +1,5 @@
-param([switch]$FirstOnly, [switch]$SqlStats, [int]$AcademicYear = 2026, [int]$Term = 2)
+param([switch]$FirstOnly, [switch]$ApiSmoke, [switch]$LoadBaseline, [switch]$SqlStats, [int]$AcademicYear = 2026, [int]$Term = 2,
+    [int]$LoadWarmupSeconds = 10, [int]$LoadMeasurementSeconds = 30, [int[]]$LoadUsers = @(10,50,100))
 # 별도 임시 PostgreSQL 컨테이너에서 실행 JAR의 초기화·재시작을 검증한다.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -54,7 +55,7 @@ function Launch([string]$stage, [bool]$expectSuccess) {
                 $readyMatch = [regex]::Match((ReadLiveLog $stdout), 'Initial data ready: mode=(created|validated), elapsedMs=(\d+)')
                 if (-not $readyMatch.Success) { throw '데이터 준비 로그 없이 /health 200을 반환했습니다.' }
                 if (($response.Content | ConvertFrom-Json).status -ne 'UP') { throw '준비 응답 본문 불일치' }
-                return [pscustomobject]@{ stage=$stage; mode=$readyMatch.Groups[1].Value; observedSeconds=[math]::Round($watch.Elapsed.TotalSeconds, 3); runnerMs=[long]$readyMatch.Groups[2].Value; healthStatus=200; observedNotReady=$observedNotReady }
+                return [pscustomobject]@{ stage=$stage; mode=$readyMatch.Groups[1].Value; observedSeconds=[math]::Round($watch.Elapsed.TotalSeconds, 3); runnerMs=[long]$readyMatch.Groups[2].Value; healthStatus=200; port=[int]$port; observedNotReady=$observedNotReady }
             }
         }
         if ($script:appProcess.HasExited) {
@@ -66,6 +67,39 @@ function Launch([string]$stage, [bool]$expectSuccess) {
         Start-Sleep -Milliseconds 500
     }
     throw "기동 제한 시간 초과. 로그: $stdout"
+}
+function VerifyApis([int]$appPort) {
+    $student = [int](Sql 'select min(student_number) from student;')
+    $base = "http://127.0.0.1:$appPort"
+    $loginBody = @{studentNumber=$student; password='startup-verification-only'} | ConvertTo-Json -Compress
+    $login = Invoke-WebRequest "$base/auth/login" -Method Post -ContentType 'application/json' -Body $loginBody -SkipHttpErrorCheck -TimeoutSec 10
+    if ([int]$login.StatusCode -ne 200) { throw '로그인 smoke 실패' }
+    $headers = @{Authorization='Bearer ' + (($login.Content | ConvertFrom-Json).accessToken)}
+    $statuses = [ordered]@{login=200}
+    foreach ($path in @('students','professors','course-offerings')) {
+        $response = Invoke-WebRequest "$base/$path" -Headers $headers -SkipHttpErrorCheck -TimeoutSec 10
+        if ([int]$response.StatusCode -ne 200) { throw "$path smoke 실패" }
+        $page = $response.Content | ConvertFrom-Json
+        $minimum = switch($path) {'students' {10000} 'professors' {100} 'course-offerings' {500}}
+        if ($page.totalElements -lt $minimum -or $page.content.Count -eq 0) { throw "$path 데이터 규모 불일치" }
+        $statuses[$path] = 200
+        if ($path -eq 'course-offerings') { $offering = $page.content[0] }
+    }
+    $body = @{courseOfferingId=[long]$offering.id} | ConvertTo-Json -Compress
+    $response = Invoke-WebRequest "$base/enrollments" -Method Post -Headers $headers -ContentType 'application/json' -Body $body -SkipHttpErrorCheck -TimeoutSec 10
+    if ([int]$response.StatusCode -ne 201) { throw '수강신청 smoke 실패' }
+    $statuses['enrollment'] = 201
+    $response = Invoke-WebRequest "$base/me/timetable" -Headers $headers -SkipHttpErrorCheck -TimeoutSec 10
+    $table = $response.Content | ConvertFrom-Json
+    if ([int]$response.StatusCode -ne 200 -or $table.content.Count -ne 1 -or $table.content[0].id -ne $offering.id -or $table.totalCredits -ne $offering.credits) { throw '시간표 smoke 실패' }
+    $statuses['timetable'] = 200
+    $response = Invoke-WebRequest "$base/enrollments/$($offering.id)" -Method Delete -Headers $headers -SkipHttpErrorCheck -TimeoutSec 10
+    if ([int]$response.StatusCode -ne 204) { throw '취소 smoke 실패' }
+    $statuses['cancellation'] = 204
+    $response = Invoke-WebRequest "$base/me/timetable" -Headers $headers -SkipHttpErrorCheck -TimeoutSec 10
+    $table = $response.Content | ConvertFrom-Json
+    if ([int]$response.StatusCode -ne 200 -or $table.content.Count -ne 0 -or $table.totalCredits -ne 0) { throw '취소 후 시간표 smoke 실패' }
+    return [pscustomobject]$statuses
 }
 function StopOwnedApp {
     if ($script:appProcess -and -not $script:appProcess.HasExited) {
@@ -103,7 +137,9 @@ try {
     if (-not $ready) { throw '검증용 PostgreSQL 준비 실패' }
     if ($SqlStats) { Sql 'CREATE EXTENSION pg_stat_statements;' | Out-Null }
     $first = Launch 'first' $true
-    $first | ConvertTo-Json -Compress | Write-Output
+    if ($ApiSmoke) { $first | Add-Member -NotePropertyName apiSmoke -NotePropertyValue (VerifyApis $first.port) }
+    if ($LoadBaseline) { & (Join-Path $PSScriptRoot 'measure-load-baseline.ps1') -ApiPort $first.port -Container $container -OutputDirectory $logs -WarmupSeconds $LoadWarmupSeconds -MeasurementSeconds $LoadMeasurementSeconds -Users $LoadUsers }
+    $first | ConvertTo-Json -Depth 4 -Compress | Write-Output
     StopOwnedApp
     if ($SqlStats) {
         $stats = Sql "SELECT coalesce(json_agg(s), '[]'::json)::text FROM (SELECT query, calls, rows, round(total_exec_time::numeric, 3) AS total_exec_ms FROM pg_stat_statements WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) ORDER BY calls DESC) s;"

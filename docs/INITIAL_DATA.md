@@ -46,7 +46,7 @@ V10은 학과 코드 컬럼과 제약을 추가하며 기존 학과 행이 없�
 
 초기화 전용 완료 상태와 Spring Boot ApplicationAvailability의 ReadinessState를 함께 확인한다. 생성 경로에서는 서비스 트랜잭션 커밋 후 완료 상태로 전환한다. `app.initial-data.enabled=false`이면 자동 초기화·검증이 생략되므로 /health는 503을 유지한다. 초기화 실패 시 서버는 기동 실패로 종료하며 준비 완료를 선언하지 않는다. HTTP 포트가 열리기 전에는 연결 자체가 되지 않을 수 있다.
 
-이 엔드포인트는 현재 구현된 애플리케이션의 기동 준비 상태를 나타낸다. 아직 구현하지 않은 인증·업무 API의 완성 여부나 기동 후 DB 장애를 상시 검사하지 않는다. 전체 과제 완료와 1분 내 업무 API 준비 조건은 최종 검증에서 별도로 확인한다.
+이 엔드포인트는 현재 구현된 애플리케이션의 기동 준비 상태를 나타낸다. 기동 후 DB 장애를 상시 검사하지 않는다. 인증·업무 API의 실제 호출과 준비 시간은 [통합 검증 기록](FINAL_VERIFICATION.md)에서 별도로 확인한다.
 
 ## 검증과 재현
 
@@ -66,3 +66,9 @@ V10은 학과 코드 컬럼과 제약을 추가하며 기존 학과 행이 없�
 - [Spring Boot 4.1 Application Availability](https://docs.spring.io/spring-boot/reference/features/spring-application.html): 모든 Runner 완료 후 트래픽 수락 상태로 전환하는 기본 생명주기를 사용한다.
 - [Spring Boot 설정 바인딩·검증](https://docs.spring.io/spring-boot/reference/features/external-config.html): ConfigurationProperties와 Bean Validation으로 잘못된 학기 설정을 기동 시 거절한다.
 - [Hibernate 세션 배치 설정](https://docs.jboss.org/hibernate/orm/current/javadocs/org/hibernate/SharedSessionContract.html), [pgJDBC 배치 재작성](https://jdbc.postgresql.org/documentation/use/): 기존 스택에서 초기 데이터의 다수 INSERT 전송 비용을 줄인다. 버전 변경이나 별도 배치 프레임워크 도입은 하지 않았다.
+
+-ApiSmoke 옵션은 최초 /health 200 이후 로그인, 학생·교수·강좌 목록의 최소 개수, 신청, 시간표, 취소 및 빈 시간표 복귀를 실제 HTTP로 검증한다. 임시 DB의 학생과 검증 전용 비밀번호·JWT만 사용하고 토큰은 보고서에 저장하지 않는다.
+
+~~~powershell
+./scripts/verify-initial-data.ps1 -ApiSmoke -AcademicYear 2030 -Term 1
+~~~
