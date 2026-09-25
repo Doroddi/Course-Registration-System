@@ -4,7 +4,10 @@ param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [int]$WarmupSeconds = 10,
     [int]$MeasurementSeconds = 30,
-    [int[]]$Users = @(10,50,100)
+    [int[]]$Users = @(10,50,100),
+    [switch]$CapacityCheck,
+    [switch]$CapacityOnly,
+    [int]$MetricsPort = 0
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -24,15 +27,17 @@ function Sql([string]$query) {
 $fixturePath = Join-Path $output 'fixture.json'
 $loadContainer = 'course-load-' + [Guid]::NewGuid().ToString('N')
 $results = [Collections.Generic.List[object]]::new()
+$collector = $null
 try {
-    $students = (Sql 'select student_number from student order by student_number limit 100;') -split '\r?\n'
+    $studentCount = if ($CapacityCheck) { 200 } else { 100 }
+    $students = (Sql "select student_number from student order by student_number limit $studentCount;") -split '\r?\n'
     $offerings = @((Sql 'select offering_id from course_offering order by capacity, offering_id limit 100;') -split '\r?\n' | ForEach-Object { [long]$_ })
     $tokens = @(foreach ($student in $students) {
         $body = @{studentNumber=[int]$student; password='startup-verification-only'} | ConvertTo-Json -Compress
         $response = Invoke-RestMethod "http://127.0.0.1:$ApiPort/auth/login" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 30
         $response.accessToken
     })
-    if ($tokens.Count -ne 100 -or $offerings.Count -ne 100 -or ($tokens | Where-Object { -not $_ })) { throw '측정용 데이터 부족' }
+    if ($tokens.Count -ne $studentCount -or $offerings.Count -ne 100 -or ($tokens | Where-Object { -not $_ })) { throw '측정용 데이터 부족' }
     [IO.File]::WriteAllText($fixturePath, (@{tokens=$tokens; offerings=$offerings} | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
     $environment = [ordered]@{
         timestampUtc=[DateTime]::UtcNow.ToString('o'); image=$image
@@ -40,9 +45,31 @@ try {
         logicalProcessors=[Environment]::ProcessorCount; os=[Environment]::OSVersion.VersionString
         docker=(& $docker info --format '{{json .}}' | ConvertFrom-Json | Select-Object ServerVersion,NCPU,MemTotal,OperatingSystem,KernelVersion)
         concentratedOffering=[long]$offerings[0]; capacity=[int](Sql "select capacity from course_offering where offering_id=$($offerings[0]);")
-        warmupSeconds=$WarmupSeconds; measurementSeconds=$MeasurementSeconds
+        warmupSeconds=$WarmupSeconds; measurementSeconds=$MeasurementSeconds; diagnostics=($MetricsPort -gt 0)
     }
     $environment | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $output 'load-environment.json') -Encoding utf8
+    $headers = @{Authorization='Bearer '+$tokens[0]}
+    # Assert management isolation instead of silently exposing diagnostics on the API port.
+    $businessMetrics = Invoke-WebRequest "http://127.0.0.1:$ApiPort/actuator/prometheus" -Headers $headers -SkipHttpErrorCheck
+    if ([int]$businessMetrics.StatusCode -ne 404) { throw '업무 포트에 지표가 노출됨' }
+    if ($MetricsPort -gt 0) {
+        $metricsUrl = "http://127.0.0.1:$MetricsPort/actuator/prometheus"
+        $anonymous = Invoke-WebRequest $metricsUrl -SkipHttpErrorCheck
+        if ([int]$anonymous.StatusCode -ne 401) { throw '지표 인증 누락' }
+        $probe = Invoke-WebRequest $metricsUrl -Headers $headers
+        if ($probe.Content -notmatch 'hikaricp_connections_active') { throw 'Hikari 지표 누락' }
+    }
+    if ($CapacityCheck) {
+        if ($environment.capacity -ne 30 -or (Sql 'select count(*) from enrollment;') -ne '0') { throw '빈 정원 30명 fixture 필요' }
+        & $docker run --rm --name $loadContainer -v "${output}:/work" -v "${PSScriptRoot}:/scripts:ro" -e "BASE_URL=http://host.docker.internal:$ApiPort" $image run --quiet /scripts/load-capacity.js
+        if ($LASTEXITCODE -ne 0) { throw '200명 정원 경쟁 HTTP 검증 실패' }
+        $capacityRows = Sql "select count(*),count(distinct student_number) from enrollment where offering_id=$($offerings[0]);"
+        if ($capacityRows -ne '30|30') { throw "정원 경쟁 DB 확인 실패: $capacityRows" }
+        [pscustomobject]@{students=200; capacity=30; rows=30; distinctStudents=30; http=(Get-Content (Join-Path $output 'capacity-summary.json') -Raw | ConvertFrom-Json)} | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $output 'capacity-result.json') -Encoding utf8
+        Write-Output 'CAPACITY_RESULT=201:30,409:170,DB:30'
+        Sql 'DELETE FROM enrollment;' | Out-Null
+    }
+    if ($CapacityOnly) { return }
     foreach ($workload in @('concentrated','distributed','mixed')) {
         foreach ($count in $Users) {
             $case = "$workload-$count"
@@ -51,8 +78,36 @@ try {
                 Sql 'DELETE FROM enrollment;' | Out-Null
                 $seconds = if ($phase -eq 'warmup') { $WarmupSeconds } else { $MeasurementSeconds }
                 Write-Output "LOAD_CASE=$case PHASE=$phase SECONDS=$seconds"
+                [pscustomobject]@{event='start'; case=$case; phase=$phase; timestampUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json -Compress | Add-Content (Join-Path $output 'load-events.jsonl') -Encoding utf8
+                if ($MetricsPort -gt 0 -and $phase -eq 'measured') {
+                    Sql 'SELECT pg_stat_statements_reset();' | Out-Null
+                    $diagnosticDirectory = Join-Path $output "$case-diagnostics"
+                    New-Item -ItemType Directory -Force $diagnosticDirectory | Out-Null
+                    $collector = Start-Job -FilePath (Join-Path $PSScriptRoot 'collect-load-diagnostics.ps1') -ArgumentList $metricsUrl,$tokens[0],$docker,$Container,$loadContainer,$diagnosticDirectory
+                    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+                    while (-not (Test-Path (Join-Path $diagnosticDirectory 'ready'))) {
+                        if ($collector.State -eq 'Failed' -or [DateTime]::UtcNow -gt $deadline) {
+                            $errorFile = Join-Path $diagnosticDirectory 'collector-error.txt'
+                            $reason = if (Test-Path $errorFile) { Get-Content $errorFile -Raw } else { $collector.ChildJobs[0].JobStateInfo.Reason.Message }
+                            throw "지표 수집기 시작 실패: $reason"
+                        }
+                        Start-Sleep -Milliseconds 200
+                    }
+                }
                 & $docker run --rm --name $loadContainer -v "${output}:/work" -v "${PSScriptRoot}:/scripts:ro" -e "BASE_URL=http://host.docker.internal:$ApiPort" -e "USERS=$count" -e "WORKLOAD=$workload" -e "SECONDS=$seconds" $image run --quiet /scripts/load-baseline.js
-                if ($LASTEXITCODE -ne 0) { throw "k6 실행 실패: $case/$phase" }
+                $loadExitCode = $LASTEXITCODE
+                [pscustomobject]@{event='end'; case=$case; phase=$phase; timestampUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json -Compress | Add-Content (Join-Path $output 'load-events.jsonl') -Encoding utf8
+                if ($collector) {
+                    New-Item -ItemType File (Join-Path $diagnosticDirectory 'stop') | Out-Null
+                    $collector | Wait-Job -Timeout 15 | Out-Null
+                    if ($collector.State -ne 'Completed') { throw '지표 수집기 종료 실패' }
+                    $collector | Receive-Job -ErrorAction Stop | Out-Null
+                    $collector | Remove-Job
+                    $collector = $null
+                    $queryStats = Sql "SELECT coalesce(json_agg(s),'[]'::json)::text FROM (SELECT query,calls,rows,total_exec_time,mean_exec_time,max_exec_time,shared_blks_hit,shared_blks_read FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query NOT LIKE '%pg_stat_activity%' AND query NOT LIKE '%pg_stat_statements%' ORDER BY total_exec_time DESC LIMIT 30) s;"
+                    $queryStats | Set-Content (Join-Path $diagnosticDirectory 'queries.json') -Encoding utf8
+                }
+                if ($loadExitCode -ne 0) { throw "k6 실행 실패: $case/$phase" }
                 $summary = Get-Content (Join-Path $output 'summary.json') -Raw | ConvertFrom-Json
                 $unexpected = 0
                 foreach ($property in $summary.metrics.PSObject.Properties) {
@@ -79,6 +134,7 @@ SELECT
     Sql 'DELETE FROM enrollment;' | Out-Null
     Write-Output "LOAD_RESULTS=$output/load-results.json"
 } finally {
+    if ($collector) { $collector | Stop-Job; $collector | Remove-Job }
     & $docker rm --force $loadContainer 2>$null | Out-Null
     if (Test-Path -LiteralPath $fixturePath) { Remove-Item -LiteralPath $fixturePath }
 }

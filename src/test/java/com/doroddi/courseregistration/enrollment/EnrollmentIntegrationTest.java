@@ -592,6 +592,26 @@ public class EnrollmentIntegrationTest {
         assertThat(body.path("code").asText()).isEqualTo(code);
         if(message!=null) assertThat(body.path("message").asText()).isEqualTo(message);
     }
+    @Test
+    void twoHundredStudentsCompeteForThirtySeats() throws Exception {
+        for (int i=12;i<200;i++) jdbc.update("insert into student(student_number,name,grade,department_id,password_hash) values (?,'학생',1,?,'test-only')", STUDENT+i, department);
+        long id=course(3,30,1);
+        var results=race(java.util.stream.IntStream.range(0,200)
+                .mapToObj(i->new Attempt(STUDENT+i,id)).toList());
+        assertThat(results.stream().filter(r->r.statusCode()==201).count()).isEqualTo(30);
+        assertThat(results.stream().filter(r->r.statusCode()==409).count()).isEqualTo(170);
+        for (var response:results) if(response.statusCode()==409) error(response,409,"COURSE_FULL",null);
+        assertThat(count(id)).isEqualTo(30);
+        assertThat(jdbc.queryForObject("select count(distinct student_number) from enrollment where offering_id=?", Long.class,id)).isEqualTo(30);
+    }
+
+    @Test
+    void metricsAreNotExposedInOrdinaryRuns() throws Exception {
+        var request=HttpRequest.newBuilder(URI.create("http://localhost:"+port+"/actuator/prometheus"))
+                .header("Authorization","Bearer "+token).GET().build();
+        assertThat(client.send(request,HttpResponse.BodyHandlers.ofString()).statusCode()).isEqualTo(404);
+    }
+
     private List<HttpResponse<String>> race(List<Attempt> attempts) throws Exception {
         CountDownLatch ready=new CountDownLatch(attempts.size()), start=new CountDownLatch(1);
         try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
