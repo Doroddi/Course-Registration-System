@@ -26,6 +26,8 @@ Spring Boot 서버 기반, Flyway V1~V10, 8개 테이블의 JPA 엔티티·Repos
 11. [내 시간표 API](docs/TIMETABLE_API.md): 신청 순서 정렬·조회 일관성과 검증 결과
 12. [신청·취소 동시성 설계](docs/CONCURRENCY_DESIGN.md): 잠금·인원 계산·신청 순서 정책과 구현 검증
 
+전체 요구사항 대조와 실행 JAR 검증 결과는 [통합 검증 기록](docs/FINAL_VERIFICATION.md)을 참고합니다.
+
 ## 개발 및 검증 계획
 
 설계 검토 → 실행 환경 → 스키마·JPA → 초기 데이터·준비 상태 → 인증 → 목록 조회 → 신청·취소·시간표 → 동시성·최종 검증 순으로 진행합니다. 변경은 기능 단위로 나누고 설계 근거와 검증 결과를 기록합니다.
@@ -78,3 +80,5 @@ PR에는 변경 이유, 검증 결과, 미해결 사항을 기록합니다. AI�
 기술 선택과 남은 물리 설계는 [기술 스택·물리 데이터 모델 검토](docs/TECH_STACK_PROPOSAL.md)에 정리합니다. 스택 확정과 실제 환경 구성·실행 검증은 구분합니다.
 
 초기 데이터의 구성·실행 설정·준비 상태는 [초기 데이터 문서](docs/INITIAL_DATA.md), 실제 측정 근거는 [성능 검증 기록](docs/INITIAL_DATA_PERFORMANCE.md)을 참고합니다.
+
+HTTP 성능의 첫 기준값과 재현 방법은 [부하 측정 기록](docs/LOAD_BASELINE.md)을 참고합니다.

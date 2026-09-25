@@ -201,13 +201,14 @@ public class EnrollmentIntegrationTest {
         error(enroll(target,token),409,"SCHEDULE_CONFLICT",null);
     }
 
-    @Test
-    void tenStudentsCompeteForLastSeatWithoutExceedingCapacity() throws Exception {
+    @ParameterizedTest @ValueSource(ints={10,100})
+    void studentsCompeteForLastSeatWithoutExceedingCapacity(int competitors) throws Exception {
+        for(int i=12;i<competitors;i++) jdbc.update("insert into student(student_number,name,grade,department_id,password_hash) values (?,'학생',1,?,'test-only')",STUDENT+i,department);
         long id=course(3,1,1);
-        List<HttpResponse<String>> results=race(java.util.stream.IntStream.range(0,10)
+        List<HttpResponse<String>> results=race(java.util.stream.IntStream.range(0,competitors)
                 .mapToObj(i->new Attempt(STUDENT+i,id)).toList());
         assertThat(results.stream().filter(r->r.statusCode()==201).count()).isEqualTo(1);
-        assertThat(results.stream().filter(r->r.statusCode()==409).count()).isEqualTo(9);
+        assertThat(results.stream().filter(r->r.statusCode()==409).count()).isEqualTo(competitors-1);
         for(var response:results) if(response.statusCode()==409) error(response,409,"COURSE_FULL",null);
         assertThat(count(id)).isEqualTo(1);
     }
